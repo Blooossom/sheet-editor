@@ -13,10 +13,11 @@ function unescapeXstring(s: string): string {
 function richText(el: Element): string {
   let out = '';
   for (const c of childElements(el)) {
-    if (c.localName === 't') out += c.textContent ?? '';
-    else if (c.localName === 'r') for (const t of childElements(c, 't')) out += t.textContent ?? '';
+    // 이스케이프는 <t> 하나 안에서만 유효하므로 잇기 전에 각각 푼다
+    if (c.localName === 't') out += unescapeXstring(c.textContent ?? '');
+    else if (c.localName === 'r') for (const t of childElements(c, 't')) out += unescapeXstring(t.textContent ?? '');
   }
-  return unescapeXstring(out);
+  return out;
 }
 
 function readSharedStrings(parts: Parts): string[] {

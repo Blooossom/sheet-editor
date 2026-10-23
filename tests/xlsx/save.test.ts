@@ -109,14 +109,32 @@ describe('saveXlsx 보강', () => {
     expect(s.cells.get(0)!.get(3)!.value).toBe(false);
   });
   it('XML 1.0에서 쓸 수 없는 제어 문자는 _xHHHH_로, 원래 _xHHHH_ 모양은 _x005F_로 감싼다', () => {
-    const out = saveXlsx(one('<sheetData/>'), [set(0, 0, { value: 'a\u0001b\tc\nd_x0041_￾', edited: true })]);
+    const out = saveXlsx(one('<sheetData/>'), [set(0, 0, { value: 'a\u0001b\tc\nd_x0041_\uFFFE', edited: true })]);
     const c = cellsXml(sheetOf(out));
     expect(c['A1']).toBe('<c r="A1" t="inlineStr"><is><t xml:space="preserve">a_x0001_b\tc\nd_x005F_x0041__xFFFE_</t></is></c>');
   });
   it('저장한 제어 문자·_xHHHH_ 모양 문자열은 다시 읽으면 원래 문자열이다', () => {
-    const v = 'a\u0001b\tc\nd_x0041_e_x005F_\uFFFE';
-    const out = saveXlsx(one('<sheetData/>'), [set(0, 0, { value: v, edited: true })]);
-    expect(readXlsx(out).sheets[0].cells.get(0)!.get(0)!.value).toBe(v);
+    const values = ['a\u0001b\tc\nd_x0041_e_x005F_\uFFFE', '_x005F_x0041_', '_x0041_x0042_', '_x0041\u0001', '__x0041__', '_x004'];
+    const out = saveXlsx(one('<sheetData/>'), values.map((v, i) => set(i, 0, { value: v, edited: true })));
+    const s = readXlsx(out).sheets[0];
+    values.forEach((v, i) => expect(s.cells.get(i)!.get(0)!.value, v).toBe(v));
+  });
+  it('\uC77D\uAE30: \uC5EC\uB7EC <r>\uB85C \uB098\uB25C _xHHHH_ \uBAA8\uC591\uC740 \uD480\uC9C0 \uC54A\uB294\uB2E4', () => {
+    const src = one('<sheetData><row r="1"><c r="A1" t="inlineStr"><is><r><t>_x00</t></r><r><t>41_</t></r></is></c></row></sheetData>');
+    expect(readXlsx(src).sheets[0].cells.get(0)!.get(0)!.value).toBe('_x0041_');
+  });
+  it('\uC218\uC2DD\uC5D0 \uC4F8 \uC218 \uC5C6\uB294 \uBB38\uC790\uAC00 \uC788\uAC70\uB098 \uC22B\uC790\uAC00 NaN\u00B7\uBB34\uD55C\uB300\uC774\uBA74 \uC800\uC7A5\uC744 \uAC70\uBD80\uD55C\uB2E4', () => {
+    expect(() => saveXlsx(RICH(), [set(0, 0, { formula: 'A1&"\u0001"', value: null, edited: true })])).toThrow(/A1 \uC140\uC758 \uC218\uC2DD/);
+    for (const n of [NaN, Infinity, -Infinity]) expect(() => saveXlsx(RICH(), [set(0, 0, { value: n, edited: true })])).toThrow(/A1 \uC140\uC758 \uC22B\uC790/);
+  });
+  it('\uD615\uC2DD\uC774 \uC798\uBABB\uB41C XML \uD30C\uD2B8(\uB9E8 & \uB4F1)\uB294 \uACE0\uCCD0 \uC4F0\uC9C0 \uC54A\uACE0 \uC800\uC7A5\uC744 \uAC70\uBD80\uD55C\uB2E4', () => {
+    const src = one('<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a & b</t></is></c></row></sheetData>');
+    expect(() => saveXlsx(src, [set(1, 0, { value: 1, edited: true })])).toThrow(/XML \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4/);
+    const undef = one('<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>x &foo; y</t></is></c></row></sheetData>');
+    expect(() => saveXlsx(undef, [set(1, 0, { value: 1, edited: true })])).toThrow(/XML \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4/);
+    // CDATA\u00B7\uC8FC\uC11D \uC548\uC758 &\uB294 \uC815\uC0C1
+    const ok = one('<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t><![CDATA[a & b]]></t></is></c></row></sheetData><!-- x & y -->');
+    expect(() => saveXlsx(ok, [set(1, 0, { value: 1, edited: true })])).not.toThrow();
   });
   it('읽기: 공유 문자열·인라인 문자열·t="str" 값의 _xHHHH_를 푼다', () => {
     const src = buildXlsx({

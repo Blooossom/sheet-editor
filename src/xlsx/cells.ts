@@ -42,11 +42,18 @@ function cellsWithIndex(rowEl: Element): { el: Element; col: number }[] {
   });
 }
 
-const ILLEGAL = /_x[0-9A-Fa-f]{4}_|[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+// XML 1.0에서 쓸 수 없는 문자: \t\n\r 외 제어 문자, U+FFFE/FFFF, 짝 없는 서로게이트
+const ILLEGAL_CHAR = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+const ILLEGAL_CHAR_G = new RegExp(ILLEGAL_CHAR.source, 'g');
 
-// OOXML ST_Xstring 이스케이프: XML 1.0에 쓸 수 없는 문자는 _xHHHH_, 원래 _xHHHH_ 모양 글자는 앞의 _를 _x005F_로
+// OOXML ST_Xstring 이스케이프. 읽을 때 _xHHHH_로 오인될 수 있는 밑줄(뒤에 xHHHH가 오는 모든 밑줄)을
+// 먼저 _x005F_로 바꾼다. 뒤의 _ 유무와 상관없이 바꿔야 토큰이 겹치거나 제어 문자 이스케이프와
+// 이어지는 경우에도 안전하다(필요 없는 곳에서 바꿔도 읽으면 같은 문자열이 된다).
+// 그다음 쓸 수 없는 문자를 _xHHHH_로 바꾼다.
 function escapeXstring(s: string): string {
-  return s.replace(ILLEGAL, (m) => (m.length > 1 ? `_x005F${m}` : `_x${m.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}_`));
+  return s
+    .replace(/_(?=x[0-9A-Fa-f]{4})/g, '_x005F_')
+    .replace(ILLEGAL_CHAR_G, (m) => `_x${m.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}_`);
 }
 
 function findOrCreateRow(doc: Document, sheetData: Element, row: number, create: boolean): Element | undefined {
@@ -104,6 +111,8 @@ export function setCellInSheet(doc: Document, row: number, col: number, cell: Ce
     return;
   }
   const { value, formula } = cell!;
+  if (formula !== undefined && ILLEGAL_CHAR.test(formula)) throw new Error(`${toA1(row, col)} 셀의 수식에 파일에 쓸 수 없는 문자가 있습니다.`);
+  if (typeof value === 'number' && !Number.isFinite(value)) throw new Error(`${toA1(row, col)} 셀의 숫자(${value})는 파일에 쓸 수 없습니다.`);
   if (formula !== undefined) {
     appendText(doc, c, 'f', formula, before);
   } else if (typeof value === 'number') {

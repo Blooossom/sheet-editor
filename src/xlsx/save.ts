@@ -34,10 +34,6 @@ export function createSaveContext(original: Uint8Array): SaveContext {
   return ctx;
 }
 
-export function contextDocs(ctx: SaveContext): Map<string, Document> {
-  return ctx.docs;
-}
-
 // 시트 DOM. 처음 불러올 때 공유 수식을 한 번 푼다.
 export function sheetDoc(ctx: SaveContext, sheet: number): Document {
   const info = ctx.sheets[sheet];
