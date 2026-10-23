@@ -1,5 +1,6 @@
 import type { Op } from '../core/types';
 import { expandSharedFormulas, setCellInSheet } from './cells';
+import { applyStructural } from './structure';
 import { dirOf, readText, relsPathOf, relTargets, sheetInfos, unzipParts, workbookPath, writeText, zipParts, type Parts, type SheetInfo } from './package';
 import { childElements, parseXml, serializeXml } from './xml';
 
@@ -51,8 +52,14 @@ export function applyOp(ctx: SaveContext, op: Op): void {
     case 'set':
       setCellInSheet(sheetDoc(ctx, op.sheet), op.row, op.col, op.cell);
       return;
-    default:
-      throw new Error('not implemented');
+    case 'insertRows':
+    case 'deleteRows':
+    case 'insertCols':
+    case 'deleteCols':
+      // 모든 시트의 수식을 옮기므로, 시트마다 공유 수식을 먼저 푼다
+      ctx.sheets.forEach((_s, i) => sheetDoc(ctx, i));
+      applyStructural(ctx, op);
+      return;
   }
 }
 

@@ -196,9 +196,6 @@ describe('saveXlsx 보강', () => {
     expect(unzipSync(out)['xl/worksheets/sheet1.xml']).toEqual(unzipSync(src)['xl/worksheets/sheet1.xml']);
     expect(partText(out, 'xl/workbook.xml')).toMatch(/fullCalcOnLoad="1"/);
   });
-  it('구조 연산은 아직 지원하지 않는다', () => {
-    expect(() => saveXlsx(RICH(), [{ kind: 'insertRows', sheet: 0, at: 0, count: 1 }])).toThrow('not implemented');
-  });
   it('직렬화가 손대지 않은 셀 표기를 바꾸는 경우 (의미는 같고 바이트만 다름) 기록', () => {
     const raw = `<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a&#10;b &apos;q&apos; &quot;d&quot; &gt; c</t></is></c><c r='B1'><v>2</v></c><c r="C1"><v></v></c><c r="D1" t="str"><f>"a"&amp;"b"</f><v>ab</v></c></row></sheetData>`;
     const out = saveXlsx(one(raw), [set(1, 0, { value: 1, edited: true })]);

@@ -24,7 +24,7 @@ function sheetDataOf(doc: Document, create: boolean): Element | undefined {
 }
 
 // r 속성이 없는 행·셀은 앞 번호 + 1 (읽기와 같은 규칙)
-function rowsWithIndex(sheetData: Element): { el: Element; row: number }[] {
+export function rowsWithIndex(sheetData: Element): { el: Element; row: number }[] {
   let prev = -1;
   return childElements(sheetData, 'row').map((el) => {
     const r = el.getAttribute('r');
@@ -33,7 +33,7 @@ function rowsWithIndex(sheetData: Element): { el: Element; row: number }[] {
   });
 }
 
-function cellsWithIndex(rowEl: Element): { el: Element; col: number }[] {
+export function cellsWithIndex(rowEl: Element): { el: Element; col: number }[] {
   let prev = -1;
   return childElements(rowEl, 'c').map((el) => {
     const r = el.getAttribute('r');
