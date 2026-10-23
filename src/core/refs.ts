@@ -53,9 +53,12 @@ function formatEndpoint(e: Endpoint): string {
 }
 
 /** 삽입/삭제 후의 [lo, hi] 구간. 구간 전체가 삭제되면 null. */
-function shiftSpan(lo: number, hi: number, at: number, count: number): [number, number] | null {
+function shiftSpan(lo: number, hi: number, at: number, count: number, limit: number): [number, number] | null {
   if (count >= 0) {
-    return [lo >= at ? lo + count : lo, hi >= at ? hi + count : hi];
+    // Excel처럼 끝은 시트 한계로 자르고, 시작이 한계를 넘으면 참조가 사라진다
+    const nlo = lo >= at ? lo + count : lo;
+    if (nlo > limit) return null;
+    return [nlo, Math.min(hi >= at ? hi + count : hi, limit)];
   }
   const n = -count;
   const end = at + n; // 삭제 구간은 [at, end)
@@ -79,7 +82,7 @@ function shiftRef(ref: string, axis: Axis, at: number, count: number): string | 
   if (eps.some((e) => e[key] === undefined)) return ref; // 이 축과 무관한 전체 행/열 참조
   const a = eps[0][key]!;
   const b = (eps[1] ?? eps[0])[key]!;
-  const span = shiftSpan(Math.min(a, b), Math.max(a, b), at, count);
+  const span = shiftSpan(Math.min(a, b), Math.max(a, b), at, count, (axis === 'row' ? MAX_ROW : MAX_COL) - 1);
   if (!span) return null;
   const [lo, hi] = span;
   const [na, nb] = a <= b ? [lo, hi] : [hi, lo];
@@ -105,6 +108,7 @@ export function shiftSqref(sqref: string, axis: Axis, at: number, count: number)
 
 const WORD = /[\p{L}\p{N}_.]/u;
 const WORD_START = /[\p{L}\p{N}_$]/u;
+const EXTERNAL_SHEET = /\[[^\]]+\][\p{L}\p{N}_.]+!/uy;
 const QUOTED_SHEET = /'(?:[^']|'')+'!/y;
 const PLAIN_SHEET = /[\p{L}_][\p{L}\p{N}_.]*!/uy;
 const REF_PATTERNS = [
@@ -149,7 +153,7 @@ function mapRefs(formula: string, fn: (prefix: string, ref: string) => string): 
       i = j + 1;
       continue;
     }
-    if (c === '[') {
+    if (c === '[' && !matchAt(EXTERNAL_SHEET, formula, i)) {
       let depth = 0;
       let j = i;
       for (; j < n; j++) {
@@ -165,8 +169,9 @@ function mapRefs(formula: string, fn: (prefix: string, ref: string) => string): 
       i += 5;
       continue;
     }
-    if (c === "'" || WORD_START.test(c)) {
-      const prefix = (c === "'" ? matchAt(QUOTED_SHEET, formula, i) : matchAt(PLAIN_SHEET, formula, i)) ?? '';
+    if (c === "'" || c === '[' || WORD_START.test(c)) {
+      const prefix =
+        (c === "'" ? matchAt(QUOTED_SHEET, formula, i) : c === '[' ? matchAt(EXTERNAL_SHEET, formula, i) : matchAt(PLAIN_SHEET, formula, i)) ?? '';
       const start = i + prefix.length;
       let hit: string | null = null;
       for (const re of REF_PATTERNS) {
@@ -201,6 +206,7 @@ function mapRefs(formula: string, fn: (prefix: string, ref: string) => string): 
 export function shiftFormula(formula: string, formulaSheet: string, shift: Shift): string {
   const target = shift.sheet.toLowerCase();
   return mapRefs(formula, (prefix, ref) => {
+    if (prefix.includes('[')) return prefix + ref; // 다른 통합 문서 참조
     const sheet = prefix ? unquoteSheet(prefix) : formulaSheet;
     if (sheet.toLowerCase() !== target) return prefix + ref;
     const moved = shiftRef(ref, shift.axis, shift.at, shift.count);

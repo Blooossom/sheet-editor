@@ -91,4 +91,21 @@ describe('refs 추가 케이스', () => {
   it('shiftSqref는 삭제된 조각만 버린다', () => {
     expect(shiftSqref('A1 A2 B2:B3', 'row', 1, -1)).toBe('A1 B2:B2');
   });
+  it('다른 통합 문서 참조는 옮기지 않는다', () => {
+    const sh = S('row', 0, 1, 'Sheet1');
+    expect(shiftFormula('[1]Sheet1!A5', 'Other', sh)).toBe('[1]Sheet1!A5');
+    expect(shiftFormula('[Book2.xlsx]Sheet1!A5+A5', 'Sheet1', sh)).toBe('[Book2.xlsx]Sheet1!A5+A6');
+    expect(shiftFormula("'[1]Sheet1'!A5", 'Other', sh)).toBe("'[1]Sheet1'!A5");
+  });
+  it('삽입 결과는 시트 한계로 자르고, 시작이 넘으면 사라진다', () => {
+    expect(shiftRange('A1:XFD1048576', 'row', 0, 1)).toBe('A2:XFD1048576');
+    expect(shiftRange('1:1048576', 'row', 0, 1)).toBe('2:1048576');
+    expect(shiftRange('A1:XFD1', 'col', 0, 1)).toBe('B1:XFD1');
+    expect(shiftRange('A1048576', 'row', 0, 1)).toBeNull();
+    expect(shiftSqref('A1048576 B1', 'row', 0, 1)).toBe('B2');
+    expect(shiftFormula('A1048576+A1:A1048576', 'Sheet1', S('row', 0, 1))).toBe('#REF!+A2:A1048576');
+  });
+  it('범위 일부 삭제 시 시작이 삭제 구간 안이면 삭제 위치로 당긴다', () => {
+    expect(shiftFormula('SUM(A5:A8)', 'Sheet1', S('row', 3, -2))).toBe('SUM(A4:A6)');
+  });
 });
