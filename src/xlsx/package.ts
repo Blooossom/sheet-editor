@@ -32,12 +32,12 @@ export function writeText(parts: Parts, path: string, text: string): void {
 
 export interface SheetInfo { name: string; path: string; relsPath: string }
 
-function dirOf(path: string): string {
+export function dirOf(path: string): string {
   const i = path.lastIndexOf('/');
   return i < 0 ? '' : path.slice(0, i);
 }
 
-function relsPathOf(path: string): string {
+export function relsPathOf(path: string): string {
   const i = path.lastIndexOf('/');
   return `${path.slice(0, i + 1)}_rels/${path.slice(i + 1)}.rels`;
 }
@@ -70,7 +70,7 @@ export function relTargets(parts: Parts, relsPath: string, baseDir: string): { i
   });
 }
 
-function workbookPath(parts: Parts): string {
+export function workbookPath(parts: Parts): string {
   const officeDoc = relTargets(parts, '_rels/.rels', '').find((r) => r.type.endsWith('/officeDocument'));
   return officeDoc?.target ?? 'xl/workbook.xml';
 }

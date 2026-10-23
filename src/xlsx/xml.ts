@@ -10,7 +10,9 @@ export function parseXml(text: string): Document {
 export function serializeXml(doc: Document): string {
   const g = globalThis as { XMLSerializer?: typeof XMLSerializer };
   const serializer = g.XMLSerializer ? new g.XMLSerializer() : (new XmldomSerializer() as unknown as XMLSerializer);
-  const body = serializer.serializeToString(doc).replace(/^<\?xml[^>]*\?>\s*/, '');
+  // xmldom은 텍스트의 CR(원래 &#13;)을 그대로 써서, 다시 읽으면 LF로 바뀐다. 파싱한 문서에 남은 CR은
+  // 문자 참조에서만 나오므로 전부 &#13;로 되돌린다.
+  const body = serializer.serializeToString(doc).replace(/^<\?xml[^>]*\?>\s*/, '').replace(/\r/g, '&#13;');
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + body;
 }
 
