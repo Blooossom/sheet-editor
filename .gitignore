@@ -4,3 +4,7 @@ src-tauri/target/
 .superpowers/
 .env
 .DS_Store
+.claude/
+node_modules
+dist-ssr
+*.local
