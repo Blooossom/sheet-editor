@@ -1,6 +1,6 @@
 import { parseA1, translateFormula } from '../core/refs';
 import type { Cell, CellValue, SheetModel, WorkbookModel } from '../core/types';
-import { findBlockers, findTableRanges } from './blockers';
+import { findBlockers, findTables } from './blockers';
 import { readText, sheetInfos, unzipParts, type Parts } from './package';
 import { childElements, descendants, parseXml } from './xml';
 
@@ -138,7 +138,7 @@ export function readXlsx(bytes: Uint8Array): WorkbookModel {
       name: info.name,
       ...readSheetCells(xml, sst),
       blockers: findBlockers(parts, info),
-      tableRanges: findTableRanges(parts, info),
+      tables: findTables(parts, info),
     };
   });
   return { kind: 'xlsx', sheets, dateStyleIds: readDateStyleIds(parts), date1904 };

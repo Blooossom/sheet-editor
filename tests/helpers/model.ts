@@ -28,7 +28,7 @@ export function makeWorkbook(
           colCount = Math.max(colCount, c + 1);
         });
       });
-      return { name, cells, rowCount, colCount, blockers: [], tableRanges: [] };
+      return { name, cells, rowCount, colCount, blockers: [], tables: [] };
     }),
   };
 }

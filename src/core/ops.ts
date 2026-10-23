@@ -116,9 +116,10 @@ function applyStructural(wb: WorkbookModel, op: Extract<Op, { at: number }>): vo
   }
 
   const signed = insert ? count : -count; // refs.ts: 삭제는 음수
-  target.tableRanges = target.tableRanges
-    .map((range) => shiftRange(range, axis, at, signed))
-    .filter((range): range is string => range !== null);
+  target.tables = target.tables.flatMap((t) => {
+    const ref = shiftRange(t.ref, axis, at, signed);
+    return ref === null ? [] : [{ ...t, ref }];
+  });
 
   const shift = { sheet: target.name, axis, at, count: signed };
   for (const sheet of wb.sheets) {
@@ -142,8 +143,8 @@ export function structuralBlockReason(wb: WorkbookModel, op: Op): string | null 
     return `이 시트에는 ${sheet.blockers.join(', ')}이(가) 있어 행·열을 추가/삭제할 수 없습니다.`;
   }
   if (op.kind === 'insertCols' || op.kind === 'deleteCols') {
-    for (const range of sheet.tableRanges) {
-      const [a, b] = range.split(':');
+    for (const { ref } of sheet.tables) {
+      const [a, b] = ref.split(':');
       const start = parseA1(a).col;
       const end = parseA1(b ?? a).col;
       const overlaps =
@@ -154,15 +155,20 @@ export function structuralBlockReason(wb: WorkbookModel, op: Op): string | null 
     }
   }
   if (op.kind === 'deleteRows') {
+    // 저장 쪽 checkTableRowDelete와 같은 규칙이어야 한다 (모델은 허용했는데 저장이 거부하면 사용자가 막힌다)
     const lo = op.at;
     const hi = op.at + op.count - 1;
-    for (const range of sheet.tableRanges) {
-      const [a, b] = range.split(':');
-      const start = parseA1(a).row; // 머리글 행 1개로 가정
+    const overlaps = (x: number, y: number) => x <= y && lo <= y && hi >= x;
+    for (const { ref, headerRows, totalsRows } of sheet.tables) {
+      const [a, b] = ref.split(':');
+      const start = parseA1(a).row;
       const end = parseA1(b ?? a).row;
-      const header = lo <= start && start <= hi;
-      const allData = end > start && lo <= start + 1 && hi >= end;
-      if (header || allData) return '표(table)의 머리글 행이나 모든 데이터 행은 삭제할 수 없습니다.';
+      const dataLo = start + headerRows;
+      const dataHi = end - totalsRows;
+      const header = headerRows > 0 && overlaps(start, start + headerRows - 1);
+      const totals = totalsRows > 0 && overlaps(end - totalsRows + 1, end);
+      const allData = dataLo <= dataHi && lo <= dataLo && hi >= dataHi;
+      if (header || totals || allData) return '표(table)의 머리글·요약 행이나 모든 데이터 행은 삭제할 수 없습니다.';
     }
   }
   return null;
@@ -178,7 +184,7 @@ export function cloneWorkbook(wb: WorkbookModel): WorkbookModel {
       rowCount: s.rowCount,
       colCount: s.colCount,
       blockers: [...s.blockers],
-      tableRanges: [...s.tableRanges],
+      tables: s.tables.map((t) => ({ ...t })),
       cells: new Map([...s.cells].map(([r, cols]) => [r, new Map([...cols].map(([c, cell]) => [c, { ...cell }]))])),
     })),
   };

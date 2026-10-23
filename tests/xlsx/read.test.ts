@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readXlsx } from '../../src/xlsx/read';
+import { saveXlsx } from '../../src/xlsx/save';
+import { structuralBlockReason } from '../../src/core/ops';
 import { buildXlsx } from '../helpers/xlsxFixture';
 const DATE_STYLES = `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font/></fonts><fills count="1"><fill/></fills><borders count="1"><border/></borders><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14" applyNumberFormat="1"/></cellXfs></styleSheet>`;
 
@@ -60,7 +62,27 @@ describe('readXlsx', () => {
       ] }],
       extraParts: { 'xl/tables/table1.xml': '<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ref="A1:D20"/>', 'xl/comments1.xml': '<comments/>' },
     }));
-    expect(wb.sheets[0].tableRanges).toEqual(['A1:D20']);
+    expect(wb.sheets[0].tables).toEqual([{ ref: 'A1:D20', headerRows: 1, totalsRows: 0 }]);
     expect(wb.sheets[0].blockers).toEqual(['메모', '확장 서식(스파크라인 등)']);
+  });
+});
+
+describe('표 머리글·요약 행', () => {
+  const TOTALS = () => buildXlsx({
+    sheets: [{ name: 'S1', xml: '<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>h</t></is></c></row><row r="2"><c r="A2"><v>1</v></c></row><row r="3"><c r="A3"><v>2</v></c></row><row r="4"><c r="A4"><v>3</v></c></row></sheetData><tableParts count="1"><tablePart r:id="rId1"/></tableParts>', rels: [{ id: 'rId1', type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table', target: '../tables/table1.xml' }] }],
+    extraParts: { 'xl/tables/table1.xml': '<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="T" displayName="T" ref="A1:A4" headerRowCount="1" totalsRowCount="1"><autoFilter ref="A1:A3"/><tableColumns count="1"><tableColumn id="1" name="h" totalsRowFunction="sum"/></tableColumns></table>' },
+  });
+  it('headerRowCount·totalsRowCount를 읽는다', () => {
+    expect(readXlsx(TOTALS()).sheets[0].tables).toEqual([{ ref: 'A1:A4', headerRows: 1, totalsRows: 1 }]);
+  });
+  it('저장이 거부하는 요약 행 삭제는 모델에서도 막고, 허용하는 삭제는 저장된다', () => {
+    const src = TOTALS();
+    const wb = readXlsx(src);
+    const totals = { kind: 'deleteRows' as const, sheet: 0, at: 3, count: 1 };
+    expect(() => saveXlsx(src, [totals])).toThrow();
+    expect(structuralBlockReason(wb, totals)).toBe('표(table)의 머리글·요약 행이나 모든 데이터 행은 삭제할 수 없습니다.');
+    const data = { kind: 'deleteRows' as const, sheet: 0, at: 1, count: 1 };
+    expect(structuralBlockReason(wb, data)).toBeNull();
+    expect(() => saveXlsx(src, [data])).not.toThrow();
   });
 });

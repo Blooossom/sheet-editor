@@ -40,7 +40,7 @@ function clearEdited(wb: WorkbookModel): void {
 function emptyWorkbook(): WorkbookModel {
   return {
     kind: 'xlsx',
-    sheets: [{ name: 'Sheet1', cells: new Map(), rowCount: 0, colCount: 0, blockers: [], tableRanges: [] }],
+    sheets: [{ name: 'Sheet1', cells: new Map(), rowCount: 0, colCount: 0, blockers: [], tables: [] }],
     dateStyleIds: new Set(),
     date1904: false,
   };

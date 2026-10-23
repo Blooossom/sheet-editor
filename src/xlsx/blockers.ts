@@ -1,5 +1,6 @@
 import { readText, relTargets, type Parts, type SheetInfo } from './package';
 import { descendants, parseXml } from './xml';
+import type { TableInfo } from '../core/types';
 
 const lastSegment = (type: string) => type.slice(type.lastIndexOf('/') + 1);
 const sheetDir = (sheet: SheetInfo) => sheet.path.slice(0, sheet.path.lastIndexOf('/'));
@@ -52,14 +53,20 @@ export function findBlockers(parts: Parts, sheet: SheetInfo): string[] {
   return blockers;
 }
 
-export function findTableRanges(parts: Parts, sheet: SheetInfo): string[] {
-  const out: string[] = [];
+export function findTables(parts: Parts, sheet: SheetInfo): TableInfo[] {
+  const out: TableInfo[] = [];
   for (const rel of relTargets(parts, sheet.relsPath, sheetDir(sheet))) {
     if (lastSegment(rel.type) !== 'table') continue;
     const text = readText(parts, rel.target);
     if (text === undefined) continue;
-    const ref = parseXml(text).documentElement?.getAttribute('ref');
-    if (ref) out.push(ref);
+    const table = parseXml(text).documentElement;
+    const ref = table?.getAttribute('ref');
+    if (!ref) continue;
+    out.push({
+      ref,
+      headerRows: Number(table.getAttribute('headerRowCount') ?? '1'),
+      totalsRows: Number(table.getAttribute('totalsRowCount') ?? '0'),
+    });
   }
   return out;
 }

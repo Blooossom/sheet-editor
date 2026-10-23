@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { parseInput, makeSetOp, applyOp, structuralBlockReason, replay, getCell, cloneWorkbook } from '../../src/core/ops';
 import { makeWorkbook } from '../helpers/model';
 const X = { kind: 'xlsx' as const, isDate: false, date1904: false };
+const table = (ref: string, headerRows = 1, totalsRows = 0) => ({ ref, headerRows, totalsRows });
+const MSG = '표(table)의 머리글·요약 행이나 모든 데이터 행은 삭제할 수 없습니다.';
 
 describe('parseInput', () => {
   it('숫자처럼 보이는 문자열을 보존한다', () => {
@@ -56,14 +58,14 @@ describe('structuralBlockReason', () => {
     wb.sheets[0].blockers = ['그림·차트'];
     expect(structuralBlockReason(wb, { kind: 'insertRows', sheet: 0, at: 0, count: 1 })).toContain('그림·차트');
     wb.sheets[0].blockers = [];
-    wb.sheets[0].tableRanges = ['B1:D10'];
+    wb.sheets[0].tables = [table('B1:D10')];
     expect(structuralBlockReason(wb, { kind: 'deleteCols', sheet: 0, at: 2, count: 1 })).toContain('표');
     expect(structuralBlockReason(wb, { kind: 'insertCols', sheet: 0, at: 1, count: 1 })).toBeNull();
     expect(structuralBlockReason(wb, { kind: 'insertRows', sheet: 0, at: 3, count: 1 })).toBeNull();
   });
   it('표 경계', () => {
     const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [[1]] }]);
-    wb.sheets[0].tableRanges = ['B1:D10'];
+    wb.sheets[0].tables = [table('B1:D10')];
     expect(structuralBlockReason(wb, { kind: 'insertCols', sheet: 0, at: 2, count: 1 })).toContain('표');
     expect(structuralBlockReason(wb, { kind: 'insertCols', sheet: 0, at: 3, count: 1 })).toContain('표');
     expect(structuralBlockReason(wb, { kind: 'insertCols', sheet: 0, at: 4, count: 1 })).toBeNull();
@@ -73,9 +75,8 @@ describe('structuralBlockReason', () => {
   });
   it('표 머리글 행·모든 데이터 행 삭제 차단', () => {
     const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [[1]] }]);
-    wb.sheets[0].tableRanges = ['B3:D6']; // 머리글 3행(index 2), 데이터 4~6행(index 3..5)
+    wb.sheets[0].tables = [table('B3:D6')]; // 머리글 3행(index 2), 데이터 4~6행(index 3..5)
     const del = (at: number, count: number) => structuralBlockReason(wb, { kind: 'deleteRows', sheet: 0, at, count });
-    const MSG = '표(table)의 머리글 행이나 모든 데이터 행은 삭제할 수 없습니다.';
     expect(del(2, 1)).toBe(MSG);
     expect(del(0, 3)).toBe(MSG);
     expect(del(3, 3)).toBe(MSG);
@@ -85,6 +86,26 @@ describe('structuralBlockReason', () => {
     expect(del(0, 2)).toBeNull();
     expect(del(6, 1)).toBeNull();
     expect(structuralBlockReason(wb, { kind: 'insertRows', sheet: 0, at: 2, count: 1 })).toBeNull();
+  });
+  it('표 요약 행 삭제 차단', () => {
+    const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [[1]] }]);
+    wb.sheets[0].tables = [table('A1:A6', 1, 1)]; // 머리글 index 0, 데이터 1..4, 요약 5
+    const del = (at: number, count: number) => structuralBlockReason(wb, { kind: 'deleteRows', sheet: 0, at, count });
+    expect(del(5, 1)).toBe(MSG);
+    expect(del(4, 2)).toBe(MSG);
+    expect(del(1, 4)).toBe(MSG); // 모든 데이터 행
+    expect(del(1, 3)).toBeNull();
+    expect(del(4, 1)).toBeNull();
+    expect(del(6, 1)).toBeNull();
+  });
+  it('머리글 없는 표(headerRowCount=0)', () => {
+    const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [[1]] }]);
+    wb.sheets[0].tables = [table('A3:A5', 0, 0)]; // 데이터 index 2..4
+    const del = (at: number, count: number) => structuralBlockReason(wb, { kind: 'deleteRows', sheet: 0, at, count });
+    expect(del(2, 1)).toBeNull(); // 첫 행도 데이터 행
+    expect(del(2, 2)).toBeNull();
+    expect(del(2, 3)).toBe(MSG);
+    expect(del(0, 5)).toBe(MSG);
   });
 });
 
@@ -151,13 +172,13 @@ describe('applyOp 추가', () => {
     applyOp(wb, { kind: 'insertRows', sheet: 0, at: 5, count: 3 });
     expect(wb.sheets[0].rowCount).toBe(2);
   });
-  it('tableRanges 이동과 삭제 시 제거', () => {
+  it('표 범위 이동과 삭제 시 제거, 머리글·요약 행 수 유지', () => {
     const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [[1]] }]);
-    wb.sheets[0].tableRanges = ['A2:C5', 'A2'];
+    wb.sheets[0].tables = [table('A2:C5', 1, 1), table('A2', 0, 0)];
     applyOp(wb, { kind: 'insertRows', sheet: 0, at: 0, count: 1 });
-    expect(wb.sheets[0].tableRanges).toEqual(['A3:C6', 'A3']);
+    expect(wb.sheets[0].tables).toEqual([table('A3:C6', 1, 1), table('A3', 0, 0)]);
     applyOp(wb, { kind: 'deleteRows', sheet: 0, at: 2, count: 1 });
-    expect(wb.sheets[0].tableRanges).toEqual(['A3:C5']);
+    expect(wb.sheets[0].tables).toEqual([table('A3:C5', 1, 1)]);
   });
 });
 

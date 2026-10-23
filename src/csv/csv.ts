@@ -200,7 +200,7 @@ export function csvToWorkbook(rows: string[][], name: string): WorkbookModel {
   });
   return {
     kind: 'csv',
-    sheets: [{ name, cells, rowCount: rows.length, colCount, blockers: [], tableRanges: [] }],
+    sheets: [{ name, cells, rowCount: rows.length, colCount, blockers: [], tables: [] }],
     dateStyleIds: new Set(),
     date1904: false,
   };

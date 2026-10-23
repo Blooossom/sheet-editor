@@ -14,7 +14,13 @@ export interface SheetModel {
   rowCount: number; // 마지막 사용 행 + 1
   colCount: number;
   blockers: string[]; // 행·열 구조 변경 차단 이유 (한국어 문구)
-  tableRanges: string[]; // 표(table) 범위 "A1:D20"
+  tables: TableInfo[];
+}
+
+export interface TableInfo {
+  ref: string; // 표(table) 범위 "A1:D20"
+  headerRows: number; // headerRowCount (기본 1)
+  totalsRows: number; // totalsRowCount (기본 0)
 }
 
 export interface WorkbookModel {
