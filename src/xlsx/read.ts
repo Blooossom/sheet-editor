@@ -141,5 +141,6 @@ export function readXlsx(bytes: Uint8Array): WorkbookModel {
       tables: findTables(parts, info),
     };
   });
+  if (sheets.length === 0) throw new Error('편집할 수 있는 워크시트가 없습니다.'); // 차트 시트만 있는 파일
   return { kind: 'xlsx', sheets, dateStyleIds: readDateStyleIds(parts), date1904 };
 }

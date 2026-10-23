@@ -40,6 +40,12 @@ describe('차트 시트', () => {
     expect(unzipSync(out)['xl/worksheets/sheet2.xml']).toEqual(unzipSync(src)['xl/worksheets/sheet2.xml']);
     expect(readXlsx(out).sheets[1].cells.get(0)?.get(1)?.value).toBe(7);
   });
+  it('워크시트가 하나도 없으면 열기를 거부한다', () => {
+    const files = unzipSync(buildXlsx({ sheets: [{ name: 'Chart', xml: '<sheetData/>' }] }));
+    files['xl/_rels/workbook.xml.rels'] = strToU8(new TextDecoder().decode(files['xl/_rels/workbook.xml.rels']).replace('/worksheet"', '/chartsheet"'));
+    files['xl/worksheets/sheet1.xml'] = strToU8(CHARTSHEET);
+    expect(() => readXlsx(zipSync(files))).toThrow('편집할 수 있는 워크시트가 없습니다.');
+  });
   it('구조 변경은 같은 시트 목록으로 수식·정의된 이름을 옮긴다', () => {
     const src = withChartsheet();
     const out = saveXlsx(src, [{ kind: 'insertRows', sheet: 1, at: 0, count: 1 }]);
