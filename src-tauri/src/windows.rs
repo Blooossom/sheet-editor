@@ -51,10 +51,29 @@ fn find_open(map: &HashMap<String, DocInfo>, path: &Path) -> Option<String> {
         .map(|(label, _)| label.clone())
 }
 
-fn find_pristine_blank(map: &HashMap<String, DocInfo>) -> Option<String> {
-    map.iter()
-        .find(|(_, d)| d.path.is_none() && !d.dirty && d.created_blank)
-        .map(|(label, _)| label.clone())
+/// 손대지 않은 빈 창. 포커스된 창을 우선하고, 아니면 번호가 가장 작은 창.
+fn find_pristine_blank(map: &HashMap<String, DocInfo>, focused: Option<&str>) -> Option<String> {
+    let mut blanks: Vec<(usize, &String)> = map
+        .iter()
+        .filter(|(_, d)| d.path.is_none() && !d.dirty && d.created_blank)
+        .map(|(l, _)| (label_number(l).unwrap_or(usize::MAX), l))
+        .collect();
+    blanks.sort();
+    blanks
+        .iter()
+        .find(|(_, l)| Some(l.as_str()) == focused)
+        .or(blanks.first())
+        .map(|(_, l)| (*l).clone())
+}
+
+fn doc_url(path: Option<&Path>) -> String {
+    match path {
+        Some(p) => format!(
+            "index.html?path={}",
+            utf8_percent_encode(&p.to_string_lossy(), NON_ALPHANUMERIC)
+        ),
+        None => "index.html?new=1".to_string(),
+    }
 }
 
 fn latest_label(map: &HashMap<String, DocInfo>) -> Option<String> {
@@ -75,13 +94,8 @@ fn create_window(app: &AppHandle, path: Option<PathBuf>) -> Result<(), String> {
     let docs = app.state::<Docs>();
     let n = docs.counter.fetch_add(1, Ordering::SeqCst) + 1;
     let label = format!("{LABEL_PREFIX}{n}");
-    let (url, title) = match &path {
-        Some(p) => {
-            let encoded = utf8_percent_encode(&p.to_string_lossy(), NON_ALPHANUMERIC).to_string();
-            (format!("index.html?path={encoded}"), title_for(Some(p)))
-        }
-        None => ("index.html?new=1".to_string(), UNTITLED.to_string()),
-    };
+    let url = doc_url(path.as_deref());
+    let title = title_for(path.as_deref());
     // 빌드 중 발생하는 창 이벤트가 잠금을 기다리지 않도록 등록 후 잠금을 풀고 만든다.
     docs.map.lock().unwrap().insert(
         label.clone(),
@@ -104,9 +118,10 @@ pub fn open(app: &AppHandle, path: Option<String>) -> Result<(), String> {
     };
     let path = canonical(&raw)?;
     let docs = app.state::<Docs>();
+    let focused = focused_label(app);
     let (existing, blank) = {
         let map = docs.map.lock().unwrap();
-        (find_open(&map, &path), find_pristine_blank(&map))
+        (find_open(&map, &path), find_pristine_blank(&map, focused.as_deref()))
     };
     if let Some(label) = existing {
         if let Some(w) = app.get_webview_window(&label) {
@@ -155,7 +170,15 @@ pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
 
 /// dirty인 문서가 있으면 true. 이때 모든 창에 close()를 걸어 각 창이 자체 확인을 띄우게 한다.
 pub fn begin_quit_if_dirty(app: &AppHandle) -> bool {
-    let any_dirty = app.state::<Docs>().map.lock().unwrap().values().any(|d| d.dirty);
+    // 이미 닫힌 창의 항목이 Destroyed 처리 전에 남아 있어도 무시한다.
+    let open = app.webview_windows();
+    let any_dirty = app
+        .state::<Docs>()
+        .map
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(label, d)| d.dirty && open.contains_key(label));
     if any_dirty {
         for (_, w) in app.webview_windows() {
             let _ = w.close();
@@ -208,13 +231,37 @@ mod tests {
         let mut map = HashMap::new();
         map.insert("doc-1".to_string(), info(None, true, true));
         map.insert("doc-2".to_string(), info(Some("/a.csv"), false, false));
-        assert!(find_pristine_blank(&map).is_none());
+        assert!(find_pristine_blank(&map, None).is_none());
         map.get_mut("doc-1").unwrap().dirty = false;
-        assert_eq!(find_pristine_blank(&map).as_deref(), Some("doc-1"));
+        assert_eq!(find_pristine_blank(&map, None).as_deref(), Some("doc-1"));
         // ?path=로 만들었다가 path가 없어질 수는 없지만, 새 문서가 아닌 창은 제외된다.
         map.insert("doc-3".to_string(), info(None, false, false));
         map.remove("doc-1");
-        assert!(find_pristine_blank(&map).is_none());
+        assert!(find_pristine_blank(&map, None).is_none());
+    }
+
+    #[test]
+    fn pristine_blank_prefers_focused_then_lowest() {
+        let mut map = HashMap::new();
+        for l in ["doc-10", "doc-2", "doc-3"] {
+            map.insert(l.to_string(), info(None, false, true));
+        }
+        assert_eq!(find_pristine_blank(&map, None).as_deref(), Some("doc-2"));
+        assert_eq!(find_pristine_blank(&map, Some("doc-10")).as_deref(), Some("doc-10"));
+        assert_eq!(find_pristine_blank(&map, Some("doc-99")).as_deref(), Some("doc-2"));
+    }
+
+    #[test]
+    fn doc_url_roundtrips_special_paths() {
+        let base = Url::parse("tauri://localhost/").unwrap();
+        for p in ["/a b/c+d&e#f%g.csv", "/Users/me/한글 폴더/문서 (1).xlsx", "/x/100%/a=b?c.csv"] {
+            let url = base.join(&doc_url(Some(Path::new(p)))).unwrap();
+            let got: Vec<_> = url.query_pairs().collect();
+            assert_eq!(got.len(), 1);
+            assert_eq!((got[0].0.as_ref(), got[0].1.as_ref()), ("path", p));
+        }
+        let url = base.join(&doc_url(None)).unwrap();
+        assert_eq!(url.query(), Some("new=1"));
     }
 
     #[test]

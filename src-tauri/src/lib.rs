@@ -3,6 +3,7 @@ mod menu;
 mod windows;
 
 use tauri::RunEvent;
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -35,8 +36,13 @@ pub fn run() {
         RunEvent::Opened { urls } => {
             for url in urls {
                 if let Some(path) = windows::file_url_to_path(&url) {
-                    if let Err(e) = windows::open(app, Some(path.to_string_lossy().into_owned())) {
+                    let shown = path.to_string_lossy().into_owned();
+                    if let Err(e) = windows::open(app, Some(shown.clone())) {
                         eprintln!("{e}");
+                        app.dialog()
+                            .message(format!("파일을 열 수 없습니다: {shown}"))
+                            .kind(MessageDialogKind::Error)
+                            .show(|_| {});
                     }
                 }
             }

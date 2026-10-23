@@ -24,7 +24,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             &PredefinedMenuItem::hide_others(app, None)?,
             &PredefinedMenuItem::show_all(app, None)?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, None)?,
+            // predefined quit은 terminate:를 호출해 ExitRequested를 거치지 않으므로 직접 만든다.
+            &item(app, "quit", "Sheet Editor 종료", "CmdOrCtrl+Q")?,
         ],
     )?;
     let file = Submenu::with_items(
@@ -66,6 +67,11 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 
 pub fn on_event(app: &AppHandle, event: MenuEvent) {
     let id = event.id().as_ref();
+    if id == "quit" {
+        // ExitRequested를 거쳐 dirty 문서 확인 흐름을 탄다.
+        app.exit(0);
+        return;
+    }
     if !IDS.contains(&id) {
         return;
     }
