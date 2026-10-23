@@ -86,11 +86,15 @@ export class DocumentStore {
   private steps: Op[][] = [];
   private redoStack: Op[][] = [];
   private listeners = new Set<() => void>();
+  private _saving = false;
 
   constructor(private io: DocumentIo) {}
 
   get dirty(): boolean {
     return this.steps.length > 0;
+  }
+  get saving(): boolean {
+    return this._saving;
   }
   get canUndo(): boolean {
     return this.steps.length > 0;
@@ -106,23 +110,38 @@ export class DocumentStore {
     };
   }
 
+  private notify(): void {
+    for (const fn of [...this.listeners]) {
+      try {
+        fn();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
+
   private changed(): void {
     this.version++;
-    for (const fn of [...this.listeners]) fn();
+    this.notify();
+  }
+
+  private assertIdle(): void {
+    if (this._saving) throw new Error('저장 중에는 편집할 수 없습니다.');
   }
 
   private install(path: string | null, source: Source, wb: WorkbookModel): void {
+    recalcWorkbook(wb); // 던지면 기존 상태를 건드리지 않는다
     this.path = path;
     this.source = source;
     this.wb = wb;
     this.base = cloneWorkbook(wb);
     this.steps = [];
     this.redoStack = [];
-    recalcWorkbook(this.wb);
     this.changed();
   }
 
   async load(path: string): Promise<void> {
+    this.assertIdle();
     const format = formatOf(path);
     try {
       if (format === 'xlsx') {
@@ -140,6 +159,7 @@ export class DocumentStore {
   }
 
   newDocument(): void {
+    this.assertIdle();
     this.install(null, { format: 'new' }, emptyWorkbook());
   }
 
@@ -149,6 +169,7 @@ export class DocumentStore {
   }
 
   setCells(edits: { sheet: number; row: number; col: number; input: string }[]): void {
+    this.assertIdle();
     const ops: Op[] = [];
     try {
       for (const e of edits) {
@@ -161,6 +182,7 @@ export class DocumentStore {
       }
     } catch (err) {
       this.rebuild();
+      this.changed();
       throw err;
     }
     if (ops.length === 0) return;
@@ -171,6 +193,7 @@ export class DocumentStore {
   }
 
   structural(sheet: number, kind: StructuralKind, rows: number[]): string | null {
+    this.assertIdle();
     const groups = runs(rows);
     if (groups.length === 0) return null;
     const ops: Op[] =
@@ -193,6 +216,7 @@ export class DocumentStore {
   }
 
   undo(): void {
+    this.assertIdle();
     const step = this.steps.pop();
     if (!step) return;
     this.redoStack.push(step);
@@ -201,6 +225,7 @@ export class DocumentStore {
   }
 
   redo(): void {
+    this.assertIdle();
     const step = this.redoStack.pop();
     if (!step) return;
     this.steps.push(step);
@@ -209,10 +234,16 @@ export class DocumentStore {
   }
 
   async save(newPath?: string): Promise<void> {
+    this.assertIdle();
+    this._saving = true;
+    this.notify();
     try {
       await this.doSave(newPath);
     } catch (e) {
       throw asError(e);
+    } finally {
+      this._saving = false;
+      this.notify();
     }
   }
 
@@ -228,10 +259,10 @@ export class DocumentStore {
         await this.io.writeFile(newPath, bytes);
         nextSource = { format: 'xlsx', bytes };
       } else {
-        const text = serializeCsv(workbookToCsvRows(this.wb), DEFAULT_DIALECT);
+        nextWb = toCsvModel(this.wb); // 파일과 메모리가 같은 표시 문자열을 갖도록 먼저 변환한다
+        const text = serializeCsv(workbookToCsvRows(nextWb), DEFAULT_DIALECT);
         await this.io.writeText(newPath, { text, encoding: 'utf-8', bom: false });
         nextSource = { format: 'csv', dialect: DEFAULT_DIALECT, encoding: 'utf-8', bom: false };
-        nextWb = toCsvModel(this.wb);
       }
       nextPath = newPath;
     } else if (src.format === 'xlsx') {
