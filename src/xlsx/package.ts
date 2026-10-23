@@ -75,6 +75,10 @@ export function workbookPath(parts: Parts): string {
   return officeDoc?.target ?? 'xl/workbook.xml';
 }
 
+/**
+ * 편집할 수 있는 워크시트 목록. 차트 시트·대화 시트·매크로 시트는 뺀다.
+ * 모델(read.ts)과 저장(save.ts)이 같은 목록을 써야 op.sheet 번호가 맞는다.
+ */
 export function sheetInfos(parts: Parts): SheetInfo[] {
   const wbPath = workbookPath(parts);
   const text = readText(parts, wbPath);
@@ -85,7 +89,7 @@ export function sheetInfos(parts: Parts): SheetInfo[] {
   for (const el of childElements(childElements(root, 'sheets')[0] ?? root, 'sheet')) {
     const rid = el.getAttributeNS(NS_REL, 'id');
     const rel = rels.find((r) => r.id === rid);
-    if (!rel) continue;
+    if (!rel || !rel.type.endsWith('/worksheet')) continue;
     out.push({ name: el.getAttribute('name') ?? '', path: rel.target, relsPath: relsPathOf(rel.target) });
   }
   return out;
