@@ -138,3 +138,25 @@ describe('구조 저장', () => {
     expect(s1).not.toContain('head');
   });
 });
+
+describe('다른 시트의 조건부 서식·데이터 유효성 수식', () => {
+  const CROSS = () => buildXlsx({ sheets: [
+    { name: 'Lists', xml: '<sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="5"><c r="A5"><v>5</v></c></row></sheetData>' },
+    { name: 'Data', xml: '<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData><conditionalFormatting sqref="A1"><cfRule type="expression" priority="1"><formula>Lists!$A$5&gt;0</formula></cfRule></conditionalFormatting><dataValidations count="1"><dataValidation type="list" sqref="A1"><formula1>Lists!$A$1:$A$5</formula1><formula2>A1</formula2></dataValidation></dataValidations>' },
+    { name: 'Other', xml: '<sheetData/><dataValidations count="1"><dataValidation type="list" sqref="A1"><formula1>$B$1:$B$3</formula1></dataValidation></dataValidations>' },
+  ] });
+  it('대상 시트를 가리키는 수식만 옮기고 sqref는 그대로', () => {
+    const out = saveXlsx(CROSS(), [op('insertRows', 0, 2)]);
+    const data = partText(out, 'xl/worksheets/sheet2.xml')!;
+    expect(data).toContain('<formula1>Lists!$A$3:$A$7</formula1>');
+    expect(data).toContain('<formula>Lists!$A$7&gt;0</formula>');
+    expect(data).toContain('<formula2>A1</formula2>'); // Data 자신의 참조는 그대로
+    expect(data).toContain('<conditionalFormatting sqref="A1">');
+    expect(data).toContain('<dataValidation type="list" sqref="A1">');
+  });
+  it('바뀌지 않은 시트는 원본 바이트 그대로', () => {
+    const src = CROSS();
+    const out = saveXlsx(src, [op('insertRows', 0, 2)]);
+    expect(partText(out, 'xl/worksheets/sheet3.xml')).toBe(partText(src, 'xl/worksheets/sheet3.xml'));
+  });
+});

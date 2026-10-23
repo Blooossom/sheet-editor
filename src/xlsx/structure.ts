@@ -239,6 +239,19 @@ function shiftSheetFormulas(doc: Document, formulaSheet: string, shift: Shift, i
   return changed;
 }
 
+/** 대상이 아닌 시트의 조건부 서식·데이터 유효성 수식(다른 시트를 가리킬 수 있다). 하나라도 바뀌면 true. */
+function shiftRuleFormulas(doc: Document, formulaSheet: string, shift: Shift): boolean {
+  const root = doc.documentElement;
+  const els = [
+    ...childElements(root, 'conditionalFormatting').flatMap((cf) => descendants(cf, 'formula')),
+    ...childElements(root, 'dataValidations').flatMap((dvs) =>
+      childElements(dvs, 'dataValidation').flatMap((dv) => [...childElements(dv, 'formula1'), ...childElements(dv, 'formula2')])),
+  ];
+  let changed = false;
+  for (const el of els) if (shiftTextOf(el, (v) => shiftFormula(v, formulaSheet, shift))) changed = true;
+  return changed;
+}
+
 function shiftDefinedNames(ctx: StructuralCtx, shift: Shift): void {
   const wbPath = workbookPath(ctx.parts);
   const wb = docOf(ctx, wbPath);
@@ -308,7 +321,10 @@ export function applyStructural(ctx: StructuralCtx, op: Extract<Op, { kind: Stru
   shiftTables(ctx, info, shift);
   for (const s of ctx.sheets) {
     const doc = docOf(ctx, s.path);
-    if (doc && shiftSheetFormulas(doc, s.name, shift, s === info)) ctx.dirty.add(s.path);
+    if (!doc) continue;
+    if (shiftSheetFormulas(doc, s.name, shift, s === info)) ctx.dirty.add(s.path);
+    // 대상 시트의 규칙 수식은 shiftTargetSheet가 sqref와 함께 옮긴다
+    if (s !== info && shiftRuleFormulas(doc, s.name, shift)) ctx.dirty.add(s.path);
   }
   const target = docOf(ctx, info.path);
   if (target) {
