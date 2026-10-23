@@ -87,6 +87,7 @@ export function detectDialect(text: string): CsvDialect {
   let cur: Record<string, number> = {};
   let curLen = 0;
   let inQuotes = false;
+  let atStart = true; // scan과 같이 따옴표는 필드 맨 앞에서만 연다
   const endLine = () => {
     if (curLen > 0) lines.push(cur);
     cur = {};
@@ -94,15 +95,28 @@ export function detectDialect(text: string): CsvDialect {
   };
   for (let i = 0; i < text.length && lines.length < SNIFF_LINES; i++) {
     const ch = text[i];
-    if (ch === '"') inQuotes = !inQuotes;
     if (inQuotes) {
+      curLen++;
+      if (ch === '"') {
+        if (text[i + 1] === '"') i++;
+        else inQuotes = false;
+      }
+    } else if (ch === '"' && atStart) {
+      inQuotes = true;
+      atStart = false;
       curLen++;
     } else if (ch === '\n') {
       if (newline === null) newline = text[i - 1] === '\r' ? '\r\n' : '\n';
       endLine();
+      atStart = true;
     } else if (ch !== '\r') {
       curLen++;
-      if (CANDIDATES.includes(ch as CsvDialect['delimiter'])) cur[ch] = (cur[ch] ?? 0) + 1;
+      if (CANDIDATES.includes(ch as CsvDialect['delimiter'])) {
+        cur[ch] = (cur[ch] ?? 0) + 1;
+        atStart = true;
+      } else {
+        atStart = false;
+      }
     }
   }
   if (lines.length < SNIFF_LINES) endLine();
@@ -149,15 +163,24 @@ export function parseCsv(text: string, d: CsvDialect): string[][] {
 }
 
 export function serializeCsv(rows: string[][], d: CsvDialect): string {
+  // 따옴표가 홀수 개이고 맨 앞이 아니면 인치 표기(12" 등)처럼 필드 중간에 쓰인 글자 그대로의 따옴표로 보고
+  // 감싸지 않는다. 파서가 이런 필드를 그대로 읽으므로 원본이 그대로 저장된다.
+  const hasQuoteNeedingWrap = (v: string) => {
+    if (!v.includes('"')) return false;
+    const n = v.split('"').length - 1;
+    return v[0] === '"' || n % 2 === 0;
+  };
   const needsQuote = (v: string) =>
-    v.includes(d.delimiter) || v.includes('"') || v.includes('\r') || v.includes('\n');
+    v.includes(d.delimiter) || v.includes('\r') || v.includes('\n') || hasQuoteNeedingWrap(v);
   const field = (v: string) => {
     if (v === '') return d.quoteEmpty ? '""' : '';
     if (d.quoteAll || needsQuote(v)) return `"${v.replace(/"/g, '""')}"`;
     return v;
   };
   if (rows.length === 0) return '';
-  const body = rows.map((r) => r.map(field).join(d.delimiter)).join(d.newline);
+  // [''] 한 칸짜리 행은 빈 줄이다 (quoteEmpty여도 "" 로 쓰지 않는다)
+  const line = (r: string[]) => (r.length === 1 && r[0] === '' ? '' : r.map(field).join(d.delimiter));
+  const body = rows.map(line).join(d.newline);
   return d.trailingNewline ? body + d.newline : body;
 }
 
@@ -186,13 +209,13 @@ export function workbookToCsvRows(wb: WorkbookModel): string[][] {
   const rows: string[][] = [];
   for (let r = 0; r < sheet.rowCount; r++) {
     const rowMap = sheet.cells.get(r);
-    const row: string[] = [];
     if (!rowMap || rowMap.size === 0) {
       rows.push(['']); // 셀이 없는 행은 빈 줄
       continue;
     }
+    const row: string[] = [];
     for (let c = 0; c < sheet.colCount; c++) {
-      const v = rowMap?.get(c)?.value ?? null;
+      const v = rowMap.get(c)?.value ?? null;
       row.push(v === null ? '' : String(v));
     }
     rows.push(row);

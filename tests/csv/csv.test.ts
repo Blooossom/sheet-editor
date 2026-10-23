@@ -35,11 +35,18 @@ describe('csv', () => {
     'a\n\nb\n',
     '|a|b\n',
     'a,b,\n,,\n',
+    'a\tb\n12" ruler\tx\n1\t2\n3\t4\n',
+    'a;b\r\n5" pipe;x\r\n1;2\r\n',
+    '"a","b"\n\n"1",""\n',
   ])('열고 그대로 저장하면 같다: %j', (s) => {
     const d = detectDialect(s);
     expect(serializeCsv(parseCsv(s, d), d)).toBe(s);
   });
 
+  it('필드 중간의 따옴표는 구분자 판별에 영향을 주지 않는다', () => {
+    expect(detectDialect('a\tb\n12" ruler\tx\n1\t2\n3\t4\n').delimiter).toBe('\t');
+    expect(detectDialect('a;b\r\n5" pipe;x\r\n1;2\r\n').delimiter).toBe(';');
+  });
   it('경계 사례 판별', () => {
     expect(detectDialect('a,"x\r\ny"\r\n1,2\r\n').newline).toBe('\r\n');
     expect(detectDialect('a\nb\n').delimiter).toBe(',');
