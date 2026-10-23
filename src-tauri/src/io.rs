@@ -86,6 +86,14 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     tmp.write_all(bytes).map_err(|e| fail(&e))?;
     if let Ok(meta) = std::fs::metadata(&target) {
         std::fs::set_permissions(tmp.path(), meta.permissions()).map_err(|e| fail(&e))?;
+    } else {
+        // 새 파일: tempfile의 기본 0o600 대신 일반 문서 권한(0o644)을 준다.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o644))
+                .map_err(|e| fail(&e))?;
+        }
     }
     tmp.as_file().sync_all().map_err(|e| fail(&e))?;
     tmp.persist(&target).map_err(|e| fail(&e.error))?;
@@ -97,12 +105,12 @@ fn read_bytes(path: &str) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-pub fn read_file(path: String) -> Result<Response, String> {
+pub async fn read_file(path: String) -> Result<Response, String> {
     read_bytes(&path).map(Response::new)
 }
 
 #[tauri::command]
-pub fn write_file(request: Request) -> Result<(), String> {
+pub async fn write_file(request: Request<'_>) -> Result<(), String> {
     let InvokeBody::Raw(bytes) = request.body() else {
         return Err("저장할 데이터가 올바르지 않습니다".to_string());
     };
@@ -119,13 +127,13 @@ pub fn write_file(request: Request) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn read_text(path: String) -> Result<TextFile, String> {
+pub async fn read_text(path: String) -> Result<TextFile, String> {
     let d = decode_text(&read_bytes(&path)?);
     Ok(TextFile { text: d.text, encoding: d.encoding.to_string(), bom: d.bom })
 }
 
 #[tauri::command]
-pub fn write_text(path: String, text: String, encoding: String, bom: bool) -> Result<(), String> {
+pub async fn write_text(path: String, text: String, encoding: String, bom: bool) -> Result<(), String> {
     // 인코딩에 실패하면 파일을 건드리지 않는다.
     let bytes = encode_text(&text, &encoding, bom)?;
     write_atomic(Path::new(&path), &bytes)
@@ -161,6 +169,13 @@ mod tests {
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o640)).unwrap();
         write_atomic(&p, b"new").unwrap();
         assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o640);
+    }
+    #[cfg(unix)]
+    #[test] fn atomic_write_new_file_is_0644() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap(); let p = dir.path().join("new.csv");
+        write_atomic(&p, b"x").unwrap();
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o644);
     }
     #[test] fn atomic_write_failure_leaves_no_temp() {
         let dir = tempfile::tempdir().unwrap();
