@@ -10,8 +10,8 @@ import {
 
 describe('csv', () => {
   it('방식 판별', () => {
-    expect(detectDialect('"a","b"\r\n"1",""\r\n')).toEqual({ delimiter: ',', newline: '\r\n', quoteAll: true, quoteEmpty: true, trailingNewline: true });
-    expect(detectDialect('a\tb\n1\t2')).toEqual({ delimiter: '\t', newline: '\n', quoteAll: false, quoteEmpty: false, trailingNewline: false });
+    expect(detectDialect('"a","b"\r\n"1",""\r\n')).toEqual({ delimiter: ',', newline: '\r\n', quoteAll: true, quoteEmpty: true, bareQuotes: false, trailingNewline: true });
+    expect(detectDialect('a\tb\n1\t2')).toEqual({ delimiter: '\t', newline: '\n', quoteAll: false, quoteEmpty: false, bareQuotes: false, trailingNewline: false });
     expect(detectDialect('a;b;c\n1;2;3\n').delimiter).toBe(';');
   });
   it('따옴표 안의 구분자·따옴표·줄바꿈', () => {
@@ -35,6 +35,8 @@ describe('csv', () => {
     'a\n\nb\n',
     '|a|b\n',
     'a,b,\n,,\n',
+    'a,b\nx "y" z,1\n',
+    'a,b\n12" ruler,1\n',
     'a\tb\n12" ruler\tx\n1\t2\n3\t4\n',
     'a;b\r\n5" pipe;x\r\n1;2\r\n',
     '"a","b"\n\n"1",""\n',
@@ -65,6 +67,11 @@ describe('csv', () => {
     expect(serializeCsv(rows, { ...base, quoteAll: true })).toBe('"a",\n,"b"');
     expect(serializeCsv(rows, { ...base, quoteAll: true, quoteEmpty: true })).toBe('"a",""\n"","b"');
     expect(serializeCsv(rows, { ...base, quoteEmpty: true })).toBe('a,""\n"",b');
+  });
+
+  it('bareQuotes가 없으면 따옴표 든 필드를 감싼다', () => {
+    expect(serializeCsv([['ab"c']], DEFAULT_DIALECT)).toBe('"ab""c"\n');
+    expect(detectDialect('a,b\n12" ruler,1\n').bareQuotes).toBe(true);
   });
 
   it('통합 문서 변환', () => {

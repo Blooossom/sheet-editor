@@ -5,6 +5,7 @@ export interface CsvDialect {
   newline: '\n' | '\r\n';
   quoteAll: boolean; // 비어 있지 않은 필드를 모두 따옴표로 감쌌는가
   quoteEmpty: boolean; // 빈 필드를 "" 로 썼는가
+  bareQuotes: boolean; // 따옴표 없는 필드 안에 글자 그대로의 " 가 있는가 (12" 등)
   trailingNewline: boolean;
 }
 
@@ -13,6 +14,7 @@ export const DEFAULT_DIALECT: CsvDialect = {
   newline: '\n',
   quoteAll: false,
   quoteEmpty: false,
+  bareQuotes: false,
   trailingNewline: true,
 };
 
@@ -136,9 +138,11 @@ export function detectDialect(text: string): CsvDialect {
   let nonEmptyQuoted = 0;
   let empty = 0;
   let emptyQuoted = 0;
+  let bareQuotes = false;
   for (const r of rows) {
     if (r.length === 1 && r[0].value === '' && !r[0].quoted) continue; // 빈 줄
     for (const f of r) {
+      if (!f.quoted && f.value.includes('"')) bareQuotes = true;
       if (f.value === '') {
         empty++;
         if (f.quoted) emptyQuoted++;
@@ -154,6 +158,7 @@ export function detectDialect(text: string): CsvDialect {
     newline: newline ?? '\n',
     quoteAll: nonEmpty > 0 && nonEmptyQuoted === nonEmpty,
     quoteEmpty: empty > 0 && emptyQuoted === empty,
+    bareQuotes,
     trailingNewline: text.endsWith('\n'),
   };
 }
@@ -163,15 +168,12 @@ export function parseCsv(text: string, d: CsvDialect): string[][] {
 }
 
 export function serializeCsv(rows: string[][], d: CsvDialect): string {
-  // 따옴표가 홀수 개이고 맨 앞이 아니면 인치 표기(12" 등)처럼 필드 중간에 쓰인 글자 그대로의 따옴표로 보고
-  // 감싸지 않는다. 파서가 이런 필드를 그대로 읽으므로 원본이 그대로 저장된다.
-  const hasQuoteNeedingWrap = (v: string) => {
-    if (!v.includes('"')) return false;
-    const n = v.split('"').length - 1;
-    return v[0] === '"' || n % 2 === 0;
-  };
   const needsQuote = (v: string) =>
-    v.includes(d.delimiter) || v.includes('\r') || v.includes('\n') || hasQuoteNeedingWrap(v);
+    v.includes(d.delimiter) ||
+    v.includes('\r') ||
+    v.includes('\n') ||
+    v[0] === '"' ||
+    (!d.bareQuotes && v.includes('"'));
   const field = (v: string) => {
     if (v === '') return d.quoteEmpty ? '""' : '';
     if (d.quoteAll || needsQuote(v)) return `"${v.replace(/"/g, '""')}"`;
