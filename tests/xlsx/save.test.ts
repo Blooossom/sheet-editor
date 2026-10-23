@@ -100,7 +100,7 @@ describe('saveXlsx 보강', () => {
       set(0, 3, { value: false, edited: true }),
     ]);
     const c = cellsXml(sheetOf(out));
-    expect(c['A1']).toBe('<c r="A1" s="3" cm="1"><v>3.5</v></c>');
+    expect(c['A1']).toBe('<c r="A1" s="3"><v>3.5</v></c>');
     expect(c['B1']).toBe('<c r="B1" t="b"><v>1</v></c>');
     expect(c['C1']).toMatch(/^<c r="C1" t="inlineStr"><is><t xml:space="preserve">a&lt;b &amp; (&quot;|")c(&quot;|")   <\/t><\/is><\/c>$/);
     expect(c['D1']).toBe('<c r="D1" t="b"><v>0</v></c>');
@@ -112,6 +112,28 @@ describe('saveXlsx 보강', () => {
     const out = saveXlsx(one('<sheetData/>'), [set(0, 0, { value: 'a\u0001b\tc\nd_x0041_￾', edited: true })]);
     const c = cellsXml(sheetOf(out));
     expect(c['A1']).toBe('<c r="A1" t="inlineStr"><is><t xml:space="preserve">a_x0001_b\tc\nd_x005F_x0041__xFFFE_</t></is></c>');
+  });
+  it('저장한 제어 문자·_xHHHH_ 모양 문자열은 다시 읽으면 원래 문자열이다', () => {
+    const v = 'a\u0001b\tc\nd_x0041_e_x005F_\uFFFE';
+    const out = saveXlsx(one('<sheetData/>'), [set(0, 0, { value: v, edited: true })]);
+    expect(readXlsx(out).sheets[0].cells.get(0)!.get(0)!.value).toBe(v);
+  });
+  it('읽기: 공유 문자열·인라인 문자열·t="str" 값의 _xHHHH_를 푼다', () => {
+    const src = buildXlsx({
+      sharedStrings: ['s_x0001_t _x005F_x0041_'],
+      sheets: [{ name: 'S1', xml: '<sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="inlineStr"><is><r><t>i_x000D_</t></r><r><t>_x005F_x0042_</t></r></is></c><c r="C1" t="str"><f>"x"</f><v>q_x0009_r</v></c></row></sheetData>' }],
+    });
+    const row = readXlsx(src).sheets[0].cells.get(0)!;
+    expect(row.get(0)!.value).toBe('s\u0001t _x0041_');
+    expect(row.get(1)!.value).toBe('i\r_x0042_');
+    expect(row.get(2)!.value).toBe('q\tr');
+  });
+  it('기존 셀에 새 값을 쓰면 cm·vm은 지우고 s와 다른 속성은 남긴다', () => {
+    const src = one('<sheetData><row r="1"><c r="A1" s="4" cm="1" ph="1"><f t="array" ref="A1:A3">SEQUENCE(3)</f><v>1</v></c><c r="B1" vm="2" t="e"><v>#VALUE!</v></c><c r="C1" s="5" vm="1" t="e"><v>#VALUE!</v></c></row></sheetData>');
+    const c = cellsXml(sheetOf(saveXlsx(src, [set(0, 0, { formula: 'B2', value: null, edited: true }), set(0, 1, { value: 'x', edited: true }), set(0, 2, { value: null, styleId: 5, edited: true })])));
+    expect(c['A1']).toBe('<c r="A1" s="4" ph="1"><f>B2</f></c>');
+    expect(c['B1']).toBe('<c r="B1" t="inlineStr"><is><t xml:space="preserve">x</t></is></c>');
+    expect(c['C1']).toBe('<c r="C1" s="5"/>');
   });
   it('수식 셀에서 t와 <v>가 남지 않는다', () => {
     const src = one('<sheetData><row r="1"><c r="A1" t="str" s="2"><f>"x"</f><v>x</v></c></row></sheetData>');

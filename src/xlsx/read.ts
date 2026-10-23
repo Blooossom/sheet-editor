@@ -4,6 +4,11 @@ import { findBlockers, findTableRanges } from './blockers';
 import { readText, sheetInfos, unzipParts, type Parts } from './package';
 import { childElements, descendants, parseXml } from './xml';
 
+// OOXML ST_Xstring: _xHHHH_ 는 그 문자, _x005F_ 는 밑줄 자체 (저장 쪽 escapeXstring의 역)
+function unescapeXstring(s: string): string {
+  return s.replace(/_x([0-9A-Fa-f]{4})_/g, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+}
+
 // <si>/<is>의 문자열: <t>와 <r>/<t>를 잇고, 발음 표기 <rPh>는 뺀다
 function richText(el: Element): string {
   let out = '';
@@ -11,7 +16,7 @@ function richText(el: Element): string {
     if (c.localName === 't') out += c.textContent ?? '';
     else if (c.localName === 'r') for (const t of childElements(c, 't')) out += t.textContent ?? '';
   }
-  return out;
+  return unescapeXstring(out);
 }
 
 function readSharedStrings(parts: Parts): string[] {
@@ -80,7 +85,7 @@ function readSheetCells(xml: string, sst: string[]): Pick<SheetModel, 'cells' | 
           text = true;
         } else if (t === 'b') value = raw === '1' || raw.toLowerCase() === 'true';
         else if (t === 'str') {
-          value = raw;
+          value = unescapeXstring(raw);
           text = true;
         } else if (t === 'e') value = raw;
         else {

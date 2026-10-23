@@ -91,9 +91,10 @@ export function setCellInSheet(doc: Document, row: number, col: number, cell: Ce
     return;
   }
 
-  // 값 관련 자식과 t만 지우고, s·cm·vm 같은 다른 속성과 extLst는 남긴다
+  // 값 관련 자식과 t를 지운다. cm·vm은 이전 수식·리치 값의 메타데이터라 남기면 Excel이 복구를 요구할 수 있다.
+  // s와 다른 속성, extLst는 남긴다.
   for (const child of childElements(c)) if (['f', 'v', 'is'].includes(child.localName)) c.removeChild(child);
-  c.removeAttribute('t');
+  for (const a of ['t', 'cm', 'vm']) c.removeAttribute(a);
   if (cell!.styleId !== undefined) c.setAttribute('s', String(cell!.styleId));
 
   const before = c.firstChild; // 남은 자식(extLst)보다 앞에 쓴다
