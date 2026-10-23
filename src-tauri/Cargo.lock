@@ -3132,6 +3132,7 @@ name = "sheet-editor"
 version = "0.1.0"
 dependencies = [
  "encoding_rs",
+ "percent-encoding",
  "serde",
  "serde_json",
  "tauri",
