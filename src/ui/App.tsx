@@ -4,11 +4,15 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { message, open, save } from '@tauri-apps/plugin-dialog';
+import { buildRowView, distinctValues } from '../core/view';
 import { DocumentStore } from '../document/store';
 import { tauriIo } from '../document/io';
+import { ContextMenu, type MenuItem } from './ContextMenu';
 import { FormulaBar } from './FormulaBar';
 import { Grid, showError, type ContextMenuRequest, type Selection } from './Grid';
 import { SheetTabs } from './SheetTabs';
+import { SidePanel } from './SidePanel';
+import { structuralArgs, type StructuralAction } from './structure';
 import { TopBar } from './TopBar';
 import { useStore } from './useStore';
 import './app.css';
@@ -75,7 +79,41 @@ function runEdit(store: DocumentStore, kind: 'undo' | 'redo'): void {
   }
 }
 
-async function handleMenu(store: DocumentStore, id: string): Promise<void> {
+interface ViewState {
+  query: string;
+  filterCol: number;
+  off: ReadonlySet<string>; // 필터에서 꺼진 값
+  rows: number[] | null; // 검색·필터 결과(원래 행 번호). 변경 시에만 다시 계산한다
+}
+
+const INITIAL_VIEW: ViewState = { query: '', filterCol: 0, off: new Set(), rows: null };
+
+function computeRows(store: DocumentStore, sheet: number, v: Omit<ViewState, 'rows'>): number[] | null {
+  const model = store.wb.sheets[sheet];
+  let filter = null;
+  if (v.off.size > 0) {
+    const all = distinctValues(model, store.wb, v.filterCol, Infinity);
+    filter = { col: v.filterCol, values: new Set(all.map((x) => x.value).filter((x) => !v.off.has(x))) };
+  }
+  return buildRowView(model, store.wb, v.query, filter);
+}
+
+const ROW_ACTIONS: [string, StructuralAction][] = [
+  ['위에 행 삽입', 'insertAbove'],
+  ['아래에 행 삽입', 'insertBelow'],
+  ['행 삭제', 'deleteRows'],
+];
+const COL_ACTIONS: [string, StructuralAction][] = [
+  ['왼쪽에 열 삽입', 'insertLeft'],
+  ['오른쪽에 열 삽입', 'insertRight'],
+  ['열 삭제', 'deleteCols'],
+];
+
+async function handleMenu(
+  store: DocumentStore,
+  id: string,
+  structural: (action: StructuralAction) => void,
+): Promise<void> {
   switch (id) {
     case 'new':
       await invoke('open_document', { path: null }).catch(showError);
@@ -95,7 +133,10 @@ async function handleMenu(store: DocumentStore, id: string): Promise<void> {
     case 'redo':
       runEdit(store, id);
       break;
-    // 'insert' / 'delete'는 행·열 메뉴(Task 15)에서 처리한다
+    case 'insert':
+    case 'delete':
+      if (!isTextInput(document.activeElement)) structural(id === 'insert' ? 'insertShortcut' : 'deleteShortcut');
+      break;
   }
 }
 
@@ -128,6 +169,11 @@ export function App() {
   const [ready, setReady] = useState(false);
   const started = useRef(false);
   const closing = useRef(false);
+  const selectionRef = useRef<Selection | null>(null);
+  const [view, setView] = useState<ViewState>(INITIAL_VIEW);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   useEffect(() => {
     if (started.current) return; // StrictMode에서 두 번 실행되지 않도록
@@ -162,7 +208,7 @@ export function App() {
   }, [store.path, name]);
 
   useTauriListener(() => getCurrentWebviewWindow().listen<string>('menu', (e) => {
-      handleMenu(store, e.payload).catch(showError);
+      handleMenu(store, e.payload, (a) => runStructural.current(a)).catch(showError);
     }));
 
   useTauriListener(() =>
@@ -210,17 +256,80 @@ export function App() {
     }),
   );
 
+  const wb = store.wb;
+  const current = Math.min(sheet, wb.sheets.length - 1);
+  const currentRef = useRef(current);
+  currentRef.current = current;
+
   const changeSheet = useCallback((index: number) => {
     setSheet(index);
     setSelection(null);
+    selectionRef.current = null;
+    setView(INITIAL_VIEW);
   }, []);
 
-  const onContextMenu = useCallback((_e: ContextMenuRequest) => {
-    // 행·열 메뉴는 Task 15에서 붙인다
+  const updateView = useCallback(
+    (patch: Partial<Omit<ViewState, 'rows'>>) => {
+      const next = { ...viewRef.current, ...patch };
+      setView({ ...next, rows: computeRows(store, currentRef.current, next) });
+    },
+    [store],
+  );
+
+  const onSelect = useCallback((sel: Selection) => {
+    selectionRef.current = sel;
+    setSelection(sel);
   }, []);
 
-  const wb = store.wb;
-  const current = Math.min(sheet, wb.sheets.length - 1);
+  const onQuery = useCallback(
+    (query: string) => {
+      if (query !== viewRef.current.query) updateView({ query });
+    },
+    [updateView],
+  );
+
+  const onFilterCol = useCallback((filterCol: number) => updateView({ filterCol, off: new Set() }), [updateView]);
+
+  const onToggle = useCallback(
+    (value: string) => {
+      const off = new Set(viewRef.current.off);
+      if (!off.delete(value)) off.add(value);
+      updateView({ off });
+    },
+    [updateView],
+  );
+
+  const onClear = useCallback(() => updateView({ off: new Set() }), [updateView]);
+
+  const runStructural = useRef<(action: StructuralAction) => void>(() => {});
+  runStructural.current = (action) => {
+    const sel = selectionRef.current;
+    if (!sel) return;
+    const { kind, rows } = structuralArgs(action, sel);
+    try {
+      const reason = store.structural(sel.sheet, kind, rows);
+      if (reason !== null) {
+        void message(reason, { kind: 'warning' });
+        return;
+      }
+    } catch (e) {
+      showError(e);
+      return;
+    }
+    // 원래 행 번호가 바뀌었으므로 다시 계산한다. 열이 바뀌면 필터 열이 어긋나므로 값 선택은 비운다.
+    updateView(kind === 'insertCols' || kind === 'deleteCols' ? { off: new Set() } : {});
+  };
+
+  const onContextMenu = useCallback((e: ContextMenuRequest) => {
+    selectionRef.current = e.sel;
+    const actions = e.target === 'row' ? ROW_ACTIONS : e.target === 'col' ? COL_ACTIONS : [...ROW_ACTIONS, ...COL_ACTIONS];
+    setMenu({
+      x: e.x,
+      y: e.y,
+      items: actions.map(([label, action]) => ({ label, onClick: () => runStructural.current(action) })),
+    });
+  }, []);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   return (
     <div className="app">
@@ -238,13 +347,26 @@ export function App() {
             key={current}
             store={store}
             sheet={current}
-            rowView={null}
-            onSelect={setSelection}
+            rowView={view.rows}
+            onSelect={onSelect}
             onContextMenu={onContextMenu}
           />
         )}
-        {/* Task 15: SidePanel */}
+        {ready && (
+          <SidePanel
+            key={current}
+            store={store}
+            sheet={current}
+            filterCol={view.filterCol}
+            off={view.off}
+            onQuery={onQuery}
+            onFilterCol={onFilterCol}
+            onToggle={onToggle}
+            onClear={onClear}
+          />
+        )}
       </div>
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={closeMenu} />}
       {wb.kind === 'xlsx' && wb.sheets.length >= 2 && (
         <SheetTabs names={wb.sheets.map((s) => s.name)} active={current} onChange={changeSheet} />
       )}
