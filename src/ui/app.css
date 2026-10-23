@@ -1,0 +1,116 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif;
+  font-size: 13px;
+  color: #1d1d1f;
+  background: #ffffff;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e5e5ea;
+}
+
+.file-name {
+  font-weight: 600;
+}
+
+.row-count {
+  color: #8a8a8e;
+}
+
+.dirty {
+  color: #d97706;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.save-button {
+  font: inherit;
+  padding: 4px 12px;
+  border: 1px solid #d1d1d6;
+  border-radius: 6px;
+  background: #f9f9fb;
+  cursor: pointer;
+}
+
+.save-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.formula-bar {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #e5e5ea;
+}
+
+.cell-address {
+  width: 72px;
+  padding: 6px 12px;
+  color: #6e6e73;
+  border-right: 1px solid #e5e5ea;
+  font-variant-numeric: tabular-nums;
+}
+
+.formula-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  padding: 6px 12px;
+  font: inherit;
+  background: transparent;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.grid {
+  flex: 1;
+  min-width: 0;
+}
+
+.sheet-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 8px;
+  border-top: 1px solid #e5e5ea;
+  background: #f4f4f5;
+  overflow-x: auto;
+}
+
+.tab {
+  font: inherit;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab.active {
+  background: #ffffff;
+  box-shadow: 0 0 0 1px #d1d1d6;
+}
