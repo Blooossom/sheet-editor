@@ -187,6 +187,10 @@ export function workbookToCsvRows(wb: WorkbookModel): string[][] {
   for (let r = 0; r < sheet.rowCount; r++) {
     const rowMap = sheet.cells.get(r);
     const row: string[] = [];
+    if (!rowMap || rowMap.size === 0) {
+      rows.push(['']); // 셀이 없는 행은 빈 줄
+      continue;
+    }
     for (let c = 0; c < sheet.colCount; c++) {
       const v = rowMap?.get(c)?.value ?? null;
       row.push(v === null ? '' : String(v));

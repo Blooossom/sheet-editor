@@ -75,6 +75,12 @@ describe('csv', () => {
     expect(empty.sheets[0].rowCount).toBe(3);
     expect(workbookToCsvRows(empty)).toEqual([[''], [''], ['']]);
   });
+  it('통합 문서를 거쳐도 빈 줄이 보존된다', () => {
+    const s = 'a,b\n1,2\n\n3,4\n';
+    const d = detectDialect(s);
+    const wb = csvToWorkbook(parseCsv(s, d), 'x');
+    expect(serializeCsv(workbookToCsvRows(wb), d)).toBe(s);
+  });
   it('숫자·불리언·null 셀은 문자열로', () => {
     const wb = csvToWorkbook([['a']], 'x');
     wb.sheets[0].cells.get(0)!.set(1, { value: 1.5 });
