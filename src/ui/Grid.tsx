@@ -14,6 +14,7 @@ import '@glideapps/glide-data-grid/dist/index.css';
 import { message } from '@tauri-apps/plugin-dialog';
 import { displayText, editText } from '../core/display';
 import { colToLetters } from '../core/refs';
+import { pasteEdits } from './paste';
 import type { DocumentStore } from '../document/store';
 
 export interface Selection {
@@ -70,14 +71,22 @@ function toSelection(gs: GridSelection, sheet: number, rowView: number[] | null)
   return { sheet, row, col, rows, cols };
 }
 
-// 0번 열(행 머리글)을 누르면 행 선택으로 바꾸고, 0번 열 머리글은 선택하지 않는다
-function normalize(gs: GridSelection): GridSelection {
-  const range = gs.current?.range;
-  if (range && range.x === 0 && range.width === 1) {
+// 0번 열(행 머리글)을 마우스로 누르면 행 선택으로 바꾼다. 키보드로 들어오면 A열에 머문다.
+// 0번 열 머리글은 선택하지 않는다.
+function normalize(gs: GridSelection, byPointer: boolean): GridSelection {
+  const current = gs.current;
+  const range = current?.range;
+  if (current && range && range.x === 0 && range.width === 1) {
+    if (byPointer) {
+      return {
+        current: undefined,
+        columns: CompactSelection.empty(),
+        rows: CompactSelection.fromSingleSelection([range.y, range.y + range.height]),
+      };
+    }
     return {
-      current: undefined,
-      columns: CompactSelection.empty(),
-      rows: CompactSelection.fromSingleSelection([range.y, range.y + range.height]),
+      ...gs,
+      current: { cell: [1, current.cell[1]], range: { ...range, x: 1 }, rangeStack: current.rangeStack },
     };
   }
   return gs.columns.hasIndex(0) ? { ...gs, columns: gs.columns.remove(0) } : gs;
@@ -94,6 +103,7 @@ export function Grid({ store, sheet, rowView, onSelect, onContextMenu }: Props) 
   const [selection, setSelection] = useState<GridSelection>(INITIAL_SELECTION);
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
+  const pointerRef = useRef(false); // 마지막 선택 변경이 마우스에서 왔는지
 
   const columns = useMemo<GridColumn[]>(() => {
     const out: GridColumn[] = [{ id: 'row', title: '', width: widths.get(0) ?? HEADER_WIDTH }];
@@ -167,6 +177,23 @@ export function Grid({ store, sheet, rowView, onSelect, onContextMenu }: Props) 
     [store, sheet, rowView],
   );
 
+  const onPaste = useCallback(
+    (target: Item, values: readonly (readonly string[])[]) => {
+      if (store.saving) return false;
+      const { edits, dropped } = pasteEdits(target, values, sheet, rowView);
+      try {
+        store.setCells(edits);
+      } catch (e) {
+        showError(e);
+      }
+      if (dropped > 0) {
+        void message(`보이는 행이 모자라 ${dropped}줄은 붙여 넣지 않았습니다.`, { kind: 'warning' });
+      }
+      return false; // Glide 기본 붙여넣기는 표 크기를 넘는 값을 버리므로 직접 처리한다
+    },
+    [store, sheet, rowView],
+  );
+
   const onCellContextMenu = useCallback(
     ([col, row]: Item, e: CellClickedEventArgs) => {
       e.preventDefault();
@@ -222,7 +249,11 @@ export function Grid({ store, sheet, rowView, onSelect, onContextMenu }: Props) 
   }, []);
 
   return (
-    <div className="grid">
+    <div
+      className="grid"
+      onMouseDownCapture={() => (pointerRef.current = true)}
+      onKeyDownCapture={() => (pointerRef.current = false)}
+    >
       <DataEditor
         width="100%"
         height="100%"
@@ -232,7 +263,8 @@ export function Grid({ store, sheet, rowView, onSelect, onContextMenu }: Props) 
         getCellsForSelection={true}
         onCellsEdited={onCellsEdited}
         gridSelection={selection}
-        onGridSelectionChange={(gs) => select(normalize(gs))}
+        onGridSelectionChange={(gs) => select(normalize(gs, pointerRef.current))}
+        onPaste={onPaste}
         onCellContextMenu={onCellContextMenu}
         onHeaderContextMenu={onHeaderContextMenu}
         onColumnResize={onColumnResize}

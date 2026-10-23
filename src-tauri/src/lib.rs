@@ -18,6 +18,7 @@ pub fn run() {
             io::write_text,
             windows::open_document,
             windows::set_document_path,
+            windows::clear_document_path,
             windows::set_dirty
         ])
         .on_window_event(|window, event| windows::on_window_event(window, event))

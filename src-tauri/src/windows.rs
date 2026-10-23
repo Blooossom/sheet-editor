@@ -155,6 +155,21 @@ pub async fn set_document_path(window: WebviewWindow, path: String) -> Result<()
     window.set_title(&title).map_err(|e| e.to_string())
 }
 
+/// 파일을 열지 못한 창을 빈 새 문서 창으로 되돌린다. 같은 파일을 다시 열면 새 창이 열리고 이 창은 교체된다.
+fn clear_path(map: &mut HashMap<String, DocInfo>, label: &str) {
+    if let Some(info) = map.get_mut(label) {
+        info.path = None;
+        info.dirty = false;
+        info.created_blank = true;
+    }
+}
+
+#[tauri::command]
+pub async fn clear_document_path(window: WebviewWindow) -> Result<(), String> {
+    clear_path(&mut window.app_handle().state::<Docs>().map.lock().unwrap(), window.label());
+    window.set_title(UNTITLED).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn set_dirty(window: WebviewWindow, dirty: bool) {
     if let Some(info) = window.app_handle().state::<Docs>().map.lock().unwrap().get_mut(window.label()) {
@@ -224,6 +239,16 @@ mod tests {
         map.insert("doc-1".to_string(), DocInfo { path: Some(c.clone()), dirty: false, created_blank: false });
         assert_eq!(find_open(&map, &c).as_deref(), Some("doc-1"));
         assert!(canonical(dir.path().join("nope.csv").to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn cleared_path_is_no_longer_open_and_counts_as_blank() {
+        let mut map = HashMap::new();
+        map.insert("doc-1".to_string(), info(Some("/a/x.csv"), false, false));
+        clear_path(&mut map, "doc-1");
+        assert_eq!(find_open(&map, Path::new("/a/x.csv")), None);
+        assert_eq!(find_pristine_blank(&map, None), Some("doc-1".to_string()));
+        clear_path(&mut map, "doc-9"); // 없는 창은 무시
     }
 
     #[test]
