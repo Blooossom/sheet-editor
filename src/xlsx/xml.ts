@@ -1,15 +1,14 @@
 import { DOMParser as XmldomParser, XMLSerializer as XmldomSerializer } from '@xmldom/xmldom';
 
-// 앱(WebView)에는 네이티브 DOMParser가 있고, vitest(node)에는 없어서 xmldom을 쓴다.
+// 앱(WebView)에서도 네이티브 DOMParser/XMLSerializer 대신 항상 xmldom을 쓴다.
+// 저장 시 원본 보존(바이트·의미)은 xmldom 동작에 대해서만 검증했기 때문이다.
 export function parseXml(text: string): Document {
-  const g = globalThis as { DOMParser?: typeof DOMParser };
-  const parser = g.DOMParser ? new g.DOMParser() : (new XmldomParser() as unknown as DOMParser);
-  return parser.parseFromString(text.replace(/^﻿/, ''), 'application/xml');
+  const parser = new XmldomParser() as unknown as DOMParser;
+  return parser.parseFromString(text.replace(/^\uFEFF/, ''), 'application/xml');
 }
 
 export function serializeXml(doc: Document): string {
-  const g = globalThis as { XMLSerializer?: typeof XMLSerializer };
-  const serializer = g.XMLSerializer ? new g.XMLSerializer() : (new XmldomSerializer() as unknown as XMLSerializer);
+  const serializer = new XmldomSerializer() as unknown as XMLSerializer;
   // xmldom은 텍스트의 CR(원래 &#13;)을 그대로 써서, 다시 읽으면 LF로 바뀐다. 파싱한 문서에 남은 CR은
   // 문자 참조에서만 나오므로 전부 &#13;로 되돌린다.
   const body = serializer.serializeToString(doc).replace(/^<\?xml[^>]*\?>\s*/, '').replace(/\r/g, '&#13;');
