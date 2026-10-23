@@ -4,11 +4,13 @@ import { applyStructural } from './structure';
 import { dirOf, readText, relsPathOf, relTargets, sheetInfos, unzipParts, workbookPath, writeText, zipParts, type Parts, type SheetInfo } from './package';
 import { childElements, parseXml, serializeXml } from './xml';
 
-// 저장 중의 패키지 상태. 파싱한 파트만 docs에 들어가고, 끝에서 그것만 다시 직렬화한다.
+// 저장 중의 패키지 상태. 파싱한 파트는 docs에 캐시하고, 끝에서 실제로 고친 파트(dirty)만 다시 직렬화한다.
+// 공유 수식을 풀기만 한 시트는 dirty가 아니므로 원본 바이트를 그대로 둔다.
 export interface SaveContext {
   parts: Parts;
   sheets: SheetInfo[];
   docs: Map<string, Document>;
+  dirty: Set<string>; // 다시 직렬화할 파트 경로
   expandedSheets: Set<string>; // 공유 수식을 이미 푼 시트 경로
   getDoc(path: string): Document;
 }
@@ -20,6 +22,7 @@ export function createSaveContext(original: Uint8Array): SaveContext {
     parts,
     sheets: sheetInfos(parts),
     docs,
+    dirty: new Set(),
     expandedSheets: new Set(),
     getDoc(path) {
       let doc = docs.get(path);
@@ -51,6 +54,7 @@ export function applyOp(ctx: SaveContext, op: Op): void {
   switch (op.kind) {
     case 'set':
       setCellInSheet(sheetDoc(ctx, op.sheet), op.row, op.col, op.cell);
+      ctx.dirty.add(ctx.sheets[op.sheet].path);
       return;
     case 'insertRows':
     case 'deleteRows':
@@ -90,18 +94,25 @@ function removeCalcChain(ctx: SaveContext, wbPath: string): void {
   if (rel) {
     const root = ctx.getDoc(wbRels).documentElement;
     for (const el of childElements(root, 'Relationship')) if (el.getAttribute('Id') === rel.id) root.removeChild(el);
+    ctx.dirty.add(wbRels);
   }
   if (ctx.parts.has('[Content_Types].xml')) {
     const root = ctx.getDoc('[Content_Types].xml').documentElement;
-    for (const el of childElements(root, 'Override')) if (el.getAttribute('PartName') === `/${path}`) root.removeChild(el);
+    for (const el of childElements(root, 'Override')) {
+      if (el.getAttribute('PartName') === `/${path}`) {
+        root.removeChild(el);
+        ctx.dirty.add('[Content_Types].xml');
+      }
+    }
   }
 }
 
 export function finishSave(ctx: SaveContext): Uint8Array {
   const wbPath = workbookPath(ctx.parts);
   setFullCalcOnLoad(ctx.getDoc(wbPath));
+  ctx.dirty.add(wbPath);
   removeCalcChain(ctx, wbPath);
-  for (const [path, doc] of ctx.docs) writeText(ctx.parts, path, serializeXml(doc));
+  for (const [path, doc] of ctx.docs) if (ctx.dirty.has(path)) writeText(ctx.parts, path, serializeXml(doc));
   return zipParts(ctx.parts);
 }
 

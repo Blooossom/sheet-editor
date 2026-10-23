@@ -153,6 +153,18 @@ export function structuralBlockReason(wb: WorkbookModel, op: Op): string | null 
       if (overlaps) return '표(table) 범위 안에서는 열을 추가/삭제할 수 없습니다.';
     }
   }
+  if (op.kind === 'deleteRows') {
+    const lo = op.at;
+    const hi = op.at + op.count - 1;
+    for (const range of sheet.tableRanges) {
+      const [a, b] = range.split(':');
+      const start = parseA1(a).row; // 머리글 행 1개로 가정
+      const end = parseA1(b ?? a).row;
+      const header = lo <= start && start <= hi;
+      const allData = end > start && lo <= start + 1 && hi >= end;
+      if (header || allData) return '표(table)의 머리글 행이나 모든 데이터 행은 삭제할 수 없습니다.';
+    }
+  }
   return null;
 }
 

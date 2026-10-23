@@ -71,6 +71,21 @@ describe('structuralBlockReason', () => {
     expect(structuralBlockReason(wb, { kind: 'deleteCols', sheet: 0, at: 3, count: 3 })).toContain('표');
     expect(structuralBlockReason(wb, { kind: 'deleteCols', sheet: 0, at: 4, count: 1 })).toBeNull();
   });
+  it('표 머리글 행·모든 데이터 행 삭제 차단', () => {
+    const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [[1]] }]);
+    wb.sheets[0].tableRanges = ['B3:D6']; // 머리글 3행(index 2), 데이터 4~6행(index 3..5)
+    const del = (at: number, count: number) => structuralBlockReason(wb, { kind: 'deleteRows', sheet: 0, at, count });
+    const MSG = '표(table)의 머리글 행이나 모든 데이터 행은 삭제할 수 없습니다.';
+    expect(del(2, 1)).toBe(MSG);
+    expect(del(0, 3)).toBe(MSG);
+    expect(del(3, 3)).toBe(MSG);
+    expect(del(3, 10)).toBe(MSG);
+    expect(del(3, 2)).toBeNull();
+    expect(del(4, 2)).toBeNull();
+    expect(del(0, 2)).toBeNull();
+    expect(del(6, 1)).toBeNull();
+    expect(structuralBlockReason(wb, { kind: 'insertRows', sheet: 0, at: 2, count: 1 })).toBeNull();
+  });
 });
 
 describe('parseInput 추가 규칙', () => {
