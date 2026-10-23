@@ -42,9 +42,10 @@ export function distinctValues(
   wb: WorkbookModel,
   col: number,
   limit = 500,
+  startRow = 0,
 ): { value: string; count: number }[] {
   const counts = new Map<string, number>();
-  for (let r = 0; r < sheet.rowCount; r++) {
+  for (let r = startRow; r < sheet.rowCount; r++) {
     const v = displayText(sheet.cells.get(r)?.get(col), wb);
     counts.set(v, (counts.get(v) ?? 0) + 1);
   }

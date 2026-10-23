@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { structuralArgs } from '../../src/ui/structure';
+import { argsToOps, shiftFilterCol, structuralArgs } from '../../src/ui/structure';
 import type { Selection } from '../../src/ui/Grid';
 
 const sel = (p: Partial<Selection>): Selection => ({ sheet: 0, row: 4, col: 2, rows: [], cols: [], ...p });
@@ -32,5 +32,39 @@ describe('structuralArgs', () => {
     expect(structuralArgs('deleteShortcut', sel({ cols: [2] }))).toEqual({ kind: 'deleteCols', rows: [2] });
     expect(structuralArgs('insertShortcut', sel({ rows: [8, 9] }))).toEqual({ kind: 'insertRows', rows: [8, 9] });
     expect(structuralArgs('deleteShortcut', sel({}))).toEqual({ kind: 'deleteRows', rows: [4] });
+  });
+});
+
+describe('stale 선택', () => {
+  it('보이는 행 밖으로 밀려난 선택은 구조 연산 대상이 없다', () => {
+    expect(structuralArgs('deleteShortcut', sel({ stale: true }))).toBeNull();
+    expect(structuralArgs('insertBelow', sel({ stale: true }))).toBeNull();
+  });
+});
+
+describe('shiftFilterCol', () => {
+  const ins = (at: number, count: number) => ({ kind: 'insertCols' as const, sheet: 0, at, count });
+  const del = (at: number, count: number) => ({ kind: 'deleteCols' as const, sheet: 0, at, count });
+  it('삽입', () => {
+    expect(shiftFilterCol(2, 0, [ins(2, 1)])).toBe(3);
+    expect(shiftFilterCol(2, 0, [ins(3, 1)])).toBe(2);
+    expect(shiftFilterCol(2, 0, [ins(0, 2)])).toBe(4);
+  });
+  it('삭제', () => {
+    expect(shiftFilterCol(2, 0, [del(0, 1)])).toBe(1);
+    expect(shiftFilterCol(2, 0, [del(2, 1)])).toBeNull();
+    expect(shiftFilterCol(2, 0, [del(1, 2)])).toBeNull();
+    expect(shiftFilterCol(2, 0, [del(3, 1)])).toBe(2);
+  });
+  it('undo는 반대로 적용하고 다른 시트·행 연산은 무시한다', () => {
+    expect(shiftFilterCol(3, 0, [ins(2, 1)], true)).toBe(2);
+    expect(shiftFilterCol(2, 0, [del(0, 1)], true)).toBe(3);
+    expect(shiftFilterCol(2, 1, [ins(0, 1)])).toBe(2);
+    expect(shiftFilterCol(2, 0, [{ kind: 'insertRows', sheet: 0, at: 0, count: 1 }])).toBe(2);
+  });
+  it('여러 열 삭제 인자를 연산으로 바꿔 적용한다', () => {
+    expect(shiftFilterCol(5, 0, argsToOps(0, 'deleteCols', [1, 3]))).toBe(3);
+    expect(shiftFilterCol(3, 0, argsToOps(0, 'deleteCols', [1, 3]))).toBeNull();
+    expect(shiftFilterCol(1, 0, argsToOps(0, 'insertCols', [1, 2]))).toBe(3);
   });
 });

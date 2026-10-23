@@ -215,22 +215,26 @@ export class DocumentStore {
     return null;
   }
 
-  undo(): void {
+  /** 되돌린 단계의 연산들(원래 적용된 방향). 되돌릴 것이 없으면 null. */
+  undo(): Op[] | null {
     this.assertIdle();
     const step = this.steps.pop();
-    if (!step) return;
+    if (!step) return null;
     this.redoStack.push(step);
     this.rebuild();
     this.changed();
+    return step;
   }
 
-  redo(): void {
+  /** 다시 적용한 단계의 연산들. 다시 할 것이 없으면 null. */
+  redo(): Op[] | null {
     this.assertIdle();
     const step = this.redoStack.pop();
-    if (!step) return;
+    if (!step) return null;
     this.steps.push(step);
     this.rebuild();
     this.changed();
+    return step;
   }
 
   async save(newPath?: string): Promise<void> {

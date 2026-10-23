@@ -4,6 +4,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { message, open, save } from '@tauri-apps/plugin-dialog';
+import type { Op } from '../core/types';
 import { buildRowView, distinctValues } from '../core/view';
 import { DocumentStore } from '../document/store';
 import { tauriIo } from '../document/io';
@@ -12,7 +13,7 @@ import { FormulaBar } from './FormulaBar';
 import { Grid, showError, type ContextMenuRequest, type Selection } from './Grid';
 import { SheetTabs } from './SheetTabs';
 import { SidePanel } from './SidePanel';
-import { structuralArgs, type StructuralAction } from './structure';
+import { argsToOps, shiftFilterCol, structuralArgs, type StructuralAction } from './structure';
 import { TopBar } from './TopBar';
 import { useStore } from './useStore';
 import './app.css';
@@ -24,7 +25,8 @@ function fileName(path: string | null): string {
 }
 
 function isTextInput(el: Element | null): boolean {
-  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+  if (el instanceof HTMLTextAreaElement) return true;
+  return el instanceof HTMLInputElement && ['text', 'search', 'number', 'email', 'tel', 'url', 'password'].includes(el.type);
 }
 
 function openPaths(paths: string[]): void {
@@ -66,14 +68,13 @@ async function saveDocument(store: DocumentStore): Promise<boolean> {
   }
 }
 
-function runEdit(store: DocumentStore, kind: 'undo' | 'redo'): void {
+function runEdit(store: DocumentStore, kind: 'undo' | 'redo', after: (ops: Op[] | null, undo: boolean) => void): void {
   if (isTextInput(document.activeElement)) {
     document.execCommand(kind);
     return;
   }
   try {
-    if (kind === 'undo') store.undo();
-    else store.redo();
+    after(kind === 'undo' ? store.undo() : store.redo(), kind === 'undo');
   } catch (e) {
     showError(e);
   }
@@ -92,10 +93,14 @@ function computeRows(store: DocumentStore, sheet: number, v: Omit<ViewState, 'ro
   const model = store.wb.sheets[sheet];
   let filter = null;
   if (v.off.size > 0) {
-    const all = distinctValues(model, store.wb, v.filterCol, Infinity);
+    // 첫 행은 머리글로 보고 값 목록에서 뺀다
+    const all = distinctValues(model, store.wb, v.filterCol, Infinity, 1);
     filter = { col: v.filterCol, values: new Set(all.map((x) => x.value).filter((x) => !v.off.has(x))) };
   }
-  return buildRowView(model, store.wb, v.query, filter);
+  const rows = buildRowView(model, store.wb, v.query, filter);
+  // 값 필터가 걸려도 머리글 행은 항상 보인다
+  if (filter && rows && rows[0] !== 0 && model.rowCount > 0) rows.unshift(0);
+  return rows;
 }
 
 const ROW_ACTIONS: [string, StructuralAction][] = [
@@ -113,6 +118,7 @@ async function handleMenu(
   store: DocumentStore,
   id: string,
   structural: (action: StructuralAction) => void,
+  after: (ops: Op[] | null, undo: boolean) => void,
 ): Promise<void> {
   switch (id) {
     case 'new':
@@ -131,7 +137,7 @@ async function handleMenu(
       break;
     case 'undo':
     case 'redo':
-      runEdit(store, id);
+      runEdit(store, id, after);
       break;
     case 'insert':
     case 'delete':
@@ -208,7 +214,7 @@ export function App() {
   }, [store.path, name]);
 
   useTauriListener(() => getCurrentWebviewWindow().listen<string>('menu', (e) => {
-      handleMenu(store, e.payload, (a) => runStructural.current(a)).catch(showError);
+      handleMenu(store, e.payload, (a) => runStructural.current(a), (ops, undo) => afterHistory.current(ops, undo)).catch(showError);
     }));
 
   useTauriListener(() =>
@@ -305,7 +311,9 @@ export function App() {
   runStructural.current = (action) => {
     const sel = selectionRef.current;
     if (!sel) return;
-    const { kind, rows } = structuralArgs(action, sel);
+    const args = structuralArgs(action, sel);
+    if (!args) return;
+    const { kind, rows } = args;
     try {
       const reason = store.structural(sel.sheet, kind, rows);
       if (reason !== null) {
@@ -316,8 +324,20 @@ export function App() {
       showError(e);
       return;
     }
-    // 원래 행 번호가 바뀌었으므로 다시 계산한다. 열이 바뀌면 필터 열이 어긋나므로 값 선택은 비운다.
-    updateView(kind === 'insertCols' || kind === 'deleteCols' ? { off: new Set() } : {});
+    // 원래 행 번호가 바뀌었으므로 다시 계산한다
+    updateView(filterPatch(argsToOps(sel.sheet, kind, rows), false));
+  };
+
+  // 열이 바뀌면 필터 열을 따라 옮기고, 필터 열이 사라지면 필터를 푼다
+  const filterPatch = (ops: Op[], undo: boolean): Partial<Omit<ViewState, 'rows'>> => {
+    const filterCol = shiftFilterCol(viewRef.current.filterCol, currentRef.current, ops, undo);
+    return filterCol === null ? { filterCol: 0, off: new Set() } : { filterCol };
+  };
+
+  const afterHistory = useRef<(ops: Op[] | null, undo: boolean) => void>(() => {});
+  afterHistory.current = (ops, undo) => {
+    if (!ops?.some((o) => o.kind !== 'set')) return; // 편집만 바뀐 경우 보이는 행은 그대로 둔다
+    updateView(filterPatch(ops, undo));
   };
 
   const onContextMenu = useCallback((e: ContextMenuRequest) => {

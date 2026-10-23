@@ -11,3 +11,8 @@ it('검색·필터는 원래 행 번호를 돌려준다', () => {
   expect(buildRowView(s, wb, '서연', { col: 2, values: new Set(['active']) })).toEqual([3]);
   expect(distinctValues(s, wb, 2)).toEqual([{ value: 'active', count: 2 }, { value: 'inactive', count: 1 }, { value: 'status', count: 1 }]);
 });
+
+it('distinctValues는 시작 행부터 센다', () => {
+  
+  expect(distinctValues(s, wb, 2, 500, 1)).toEqual([{ value: 'active', count: 2 }, { value: 'inactive', count: 1 }]);
+});

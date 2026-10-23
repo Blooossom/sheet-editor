@@ -158,3 +158,13 @@ it('떨어진 구간 삭제는 한 단위, 삽입은 최솟값 위치에 개수�
   expect(workbookCol(st, 0)).toEqual(['h', 'a', undefined, undefined, 'b', 'c', 'd']);
   st.undo(); expect(st.canUndo).toBe(false);
 });
+
+it('undo·redo는 되돌린 단계의 연산을 돌려준다', async () => {
+  const { io } = fakeIo({ '/t/a.csv': CSV });
+  const st = new DocumentStore(io); await st.load('/t/a.csv');
+  expect(st.undo()).toBeNull();
+  st.structural(0, 'deleteRows', [1]);
+  expect(st.undo()?.map((o) => o.kind)).toEqual(['deleteRows']);
+  expect(st.redo()?.map((o) => o.kind)).toEqual(['deleteRows']);
+  expect(st.redo()).toBeNull();
+});

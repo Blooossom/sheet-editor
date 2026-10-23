@@ -23,6 +23,7 @@ export interface Selection {
   col: number;
   rows: number[]; // 머리글로 선택된 원래 행 번호
   cols: number[];
+  stale?: boolean; // 선택이 보이는 행 밖이라 대상을 알 수 없다
 }
 
 export interface ContextMenuRequest {
@@ -54,21 +55,32 @@ const INITIAL_SELECTION: GridSelection = {
   rows: CompactSelection.empty(),
 };
 
+const EMPTY_SELECTION: GridSelection = {
+  current: undefined,
+  columns: CompactSelection.empty(),
+  rows: CompactSelection.empty(),
+};
+
 function toSelection(gs: GridSelection, sheet: number, rowView: number[] | null): Selection {
   const orig = (r: number) => (rowView ? rowView[r] : r);
   const rows = gs.rows.toArray().map(orig).filter((r): r is number => r !== undefined);
   const cols = gs.columns.toArray().filter((c) => c >= 1).map((c) => c - 1);
   let row = orig(0) ?? 0;
   let col = 0;
+  let stale = false;
   if (gs.current) {
-    row = orig(gs.current.cell[1]) ?? row;
+    const r = orig(gs.current.cell[1]);
+    stale = r === undefined;
+    row = r ?? row;
     col = Math.max(gs.current.cell[0] - 1, 0);
   } else if (rows.length > 0) {
     row = rows[0];
   } else if (cols.length > 0) {
     col = cols[0];
+  } else {
+    stale = true;
   }
-  return { sheet, row, col, rows, cols };
+  return { sheet, row, col, rows, cols, ...(stale ? { stale } : {}) };
 }
 
 // 0번 열(행 머리글)을 마우스로 누르면 행 선택으로 바꾼다. 키보드로 들어오면 A열에 머문다.
@@ -153,8 +165,16 @@ export function Grid({ store, sheet, rowView, onSelect, onContextMenu }: Props) 
     [onSelect, sheet, rowView],
   );
 
+  // 보이는 행이 바뀌면 화면 번호가 가리키는 행도 달라지므로 선택을 비운다
+  const prevView = useRef(rowView);
   useEffect(() => {
-    onSelect(toSelection(selectionRef.current, sheet, rowView));
+    let gs = selectionRef.current;
+    if (prevView.current !== rowView) {
+      prevView.current = rowView;
+      gs = EMPTY_SELECTION;
+      setSelection(gs);
+    }
+    onSelect(toSelection(gs, sheet, rowView));
   }, [onSelect, sheet, rowView]);
 
   const onCellsEdited = useCallback(

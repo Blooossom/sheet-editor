@@ -26,7 +26,7 @@ export function SidePanel({ store, sheet, filterCol, off, onQuery, onFilterCol, 
   const model = store.wb.sheets[sheet];
   const version = store.version;
   const values = useMemo(
-    () => distinctValues(model, store.wb, filterCol, LIMIT + 1),
+    () => distinctValues(model, store.wb, filterCol, LIMIT + 1, 1),
     // 편집·구조 변경 뒤에도 값 목록은 최신으로 맞춘다
     [model, store, filterCol, version],
   );
@@ -57,6 +57,7 @@ export function SidePanel({ store, sheet, filterCol, off, onQuery, onFilterCol, 
           </label>
         ))}
       </div>
+      <div className="panel-note">첫 행(머리글)은 항상 표시됩니다</div>
       {values.length > LIMIT && <div className="panel-note">상위 500개만 표시</div>}
     </aside>
   );
