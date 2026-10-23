@@ -35,15 +35,20 @@ export function parseInput(input: string, ctx: ParseCtx): Cell | null {
   };
   if (input === '') return styleId !== undefined ? { value: null, styleId, edited: true } : null;
   if (ctx.kind === 'csv') return { value: input, text: true, edited: true };
-  if (input.startsWith('=')) return withStyle({ formula: input.slice(1), value: null });
-  if (ctx.prev?.text || /^0\d/.test(input) || /^-?\d{16,}/.test(input)) {
+  if (input.startsWith('=') && input.length > 1) return withStyle({ formula: input.slice(1), value: null });
+  // 수식 셀의 문자열 결과(text)는 상속하지 않는다
+  const prevIsText = ctx.prev?.text === true && ctx.prev.formula === undefined;
+  if (prevIsText || /^-?0\d/.test(input) || /^-?\d{16,}/.test(input)) {
     return withStyle({ value: input, text: true });
   }
   if (ctx.isDate) {
     const serial = parseDate(input, ctx.date1904);
     if (serial !== null) return withStyle({ value: serial });
   }
-  if (NUMBER_RE.test(input)) return withStyle({ value: Number(input) });
+  if (NUMBER_RE.test(input)) {
+    const n = Number(input);
+    if (Number.isFinite(n)) return withStyle({ value: n === 0 ? 0 : n }); // -0 → 0
+  }
   return withStyle({ value: input, text: true });
 }
 
@@ -87,6 +92,7 @@ function applyStructural(wb: WorkbookModel, op: Extract<Op, { at: number }>): vo
   const axis: Axis = op.kind === 'insertRows' || op.kind === 'deleteRows' ? 'row' : 'col';
   const insert = op.kind === 'insertRows' || op.kind === 'insertCols';
   const { at, count } = op;
+  if (!(count >= 1)) throw new Error(`count는 1 이상이어야 합니다: ${count}`);
 
   const moved = new Map<number, Map<number, Cell>>();
   for (const [r, cols] of target.cells) {
