@@ -5,7 +5,6 @@
   "windows": ["doc-*"],
   "permissions": [
     "core:default",
-    "opener:default",
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-message",
