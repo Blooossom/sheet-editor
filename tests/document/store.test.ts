@@ -50,6 +50,18 @@ it('값이 같은 편집은 단위를 만들지 않고, 구독자에게 알린�
   st.structural(0, 'insertRows', [1, 2]); expect(st.wb.sheets[0].rowCount).toBe(6); expect(n).toBe(1);
   off(); st.undo(); expect(n).toBe(1);
 });
+it('고친 것이 없으면 저장해도 파일을 다시 쓰지 않는다 (새 문서는 예외)', async () => {
+  const xlsx = buildXlsx({ sheets: [{ name: 'S', xml: '<sheetData/>' }] });
+  const { io, written } = fakeIo({ '/t/a.csv': CSV, '/t/b.xlsx': xlsx });
+  const csv = new DocumentStore(io); await csv.load('/t/a.csv');
+  await csv.save();
+  const book = new DocumentStore(io); await book.load('/t/b.xlsx');
+  await book.save();
+  expect(written).toEqual({});
+  const fresh = new DocumentStore(io); fresh.newDocument();
+  await fresh.save('/t/new.xlsx');
+  expect(Object.keys(written)).toEqual(['/t/new.xlsx']);
+});
 it('지원하지 않는 확장자는 거부한다', async () => {
   const st = new DocumentStore(fakeIo({}).io);
   await expect(st.load('/t/a.txt')).rejects.toThrow('지원하지 않는 파일 형식입니다');

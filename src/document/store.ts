@@ -239,6 +239,7 @@ export class DocumentStore {
 
   async save(newPath?: string): Promise<void> {
     this.assertIdle();
+    if (!this.dirty && this.source.format !== 'new') return; // 고친 것이 없으면 파일을 다시 쓰지 않는다
     this._saving = true;
     this.notify();
     try {
