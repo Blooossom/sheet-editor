@@ -4,7 +4,7 @@ import { DOMParser as XmldomParser, XMLSerializer as XmldomSerializer } from '@x
 export function parseXml(text: string): Document {
   const g = globalThis as { DOMParser?: typeof DOMParser };
   const parser = g.DOMParser ? new g.DOMParser() : (new XmldomParser() as unknown as DOMParser);
-  return parser.parseFromString(text, 'application/xml');
+  return parser.parseFromString(text.replace(/^﻿/, ''), 'application/xml');
 }
 
 export function serializeXml(doc: Document): string {

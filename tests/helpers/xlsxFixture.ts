@@ -28,7 +28,7 @@ function overrideTypeFor(path: string): string | undefined {
   return undefined;
 }
 
-export function buildXlsx(o: { sheets: FixtureSheet[]; sharedStrings?: string[]; styles?: string; workbookExtra?: string; extraParts?: Record<string, string> }): Uint8Array {
+export function buildXlsx(o: { sheets: FixtureSheet[]; sharedStrings?: string[]; styles?: string; workbookExtra?: string; workbookPrefix?: string; extraParts?: Record<string, string> }): Uint8Array {
   const files: Record<string, Uint8Array> = {};
   const put = (path: string, text: string) => { files[path] = strToU8(text); };
   const extra = o.extraParts ?? {};
@@ -57,7 +57,7 @@ export function buildXlsx(o: { sheets: FixtureSheet[]; sharedStrings?: string[];
   if ('xl/calcChain.xml' in extra) addRel('calcChain', 'calcChain.xml');
   put('xl/_rels/workbook.xml.rels', `${HEADER}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${wbRels.join('')}</Relationships>`);
 
-  put('xl/workbook.xml', `${HEADER}<workbook xmlns="${NS_MAIN}" xmlns:r="${NS_R}"><sheets>${o.sheets.map((s, i) => `<sheet name="${esc(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets>${o.workbookExtra ?? ''}</workbook>`);
+  put('xl/workbook.xml', `${HEADER}<workbook xmlns="${NS_MAIN}" xmlns:r="${NS_R}">${o.workbookPrefix ?? ''}<sheets>${o.sheets.map((s, i) => `<sheet name="${esc(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets>${o.workbookExtra ?? ''}</workbook>`);
 
   o.sheets.forEach((s, i) => {
     put(`xl/worksheets/sheet${i + 1}.xml`, `${HEADER}<worksheet xmlns="${NS_MAIN}" xmlns:r="${NS_R}">${s.xml}</worksheet>`);

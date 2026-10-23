@@ -24,19 +24,24 @@ function isDateFormatCode(code: string): boolean {
   return /[ydhs]/i.test(code.replace(/"[^"]*"/g, '').replace(/\[[^\]]*\]/g, ''));
 }
 
+// 내장 날짜·시간 서식 (한국어 로캘용 27–36, 50–58 포함)
+function isBuiltinDateId(id: number): boolean {
+  return (id >= 14 && id <= 22) || (id >= 27 && id <= 36) || (id >= 45 && id <= 47) || (id >= 50 && id <= 58);
+}
+
 function readDateStyleIds(parts: Parts): Set<number> {
   const ids = new Set<number>();
   const text = readText(parts, 'xl/styles.xml');
   if (text === undefined) return ids;
   const root = parseXml(text).documentElement;
   const custom = new Map<number, string>();
-  for (const nf of descendants(root, 'numFmt')) custom.set(Number(nf.getAttribute('numFmtId')), nf.getAttribute('formatCode') ?? '');
+  for (const nf of childElements(childElements(root, 'numFmts')[0] ?? root, 'numFmt')) custom.set(Number(nf.getAttribute('numFmtId')), nf.getAttribute('formatCode') ?? '');
   const cellXfs = childElements(root, 'cellXfs')[0];
   if (!cellXfs) return ids;
   childElements(cellXfs, 'xf').forEach((xf, i) => {
     const id = Number(xf.getAttribute('numFmtId') ?? 0);
     const code = custom.get(id);
-    if ((id >= 14 && id <= 22) || (id >= 45 && id <= 47) || (code !== undefined && isDateFormatCode(code))) ids.add(i);
+    if (isBuiltinDateId(id) || (code !== undefined && isDateFormatCode(code))) ids.add(i);
   });
   return ids;
 }
@@ -46,7 +51,7 @@ function readSheetCells(xml: string, sst: string[]): Pick<SheetModel, 'cells' | 
   let rowCount = 0;
   let colCount = 0;
   const masters = new Map<string, { row: number; col: number; formula: string }>();
-  const sheetData = descendants(parseXml(xml).documentElement, 'sheetData')[0];
+  const sheetData = childElements(parseXml(xml).documentElement, 'sheetData')[0];
   let prevRow = -1;
   for (const rowEl of sheetData ? childElements(sheetData, 'row') : []) {
     const rAttr = rowEl.getAttribute('r');

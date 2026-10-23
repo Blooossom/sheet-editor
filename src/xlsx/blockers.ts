@@ -28,7 +28,7 @@ export function findBlockers(parts: Parts, sheet: SheetInfo): string[] {
     for (const [path, data] of parts) {
       if (!/^xl\/pivotCache\/pivotCacheDefinition[^/]*\.xml$/.test(path)) continue;
       const root = parseXml(new TextDecoder().decode(data)).documentElement;
-      if (descendants(root, 'worksheetSource').some((el) => el.getAttribute('sheet') === sheet.name)) {
+      if (descendants(root, 'worksheetSource').some((el) => (el.getAttribute('sheet') ?? '').toLowerCase() === sheet.name.toLowerCase())) {
         pivot = true;
         break;
       }

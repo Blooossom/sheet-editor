@@ -1,5 +1,5 @@
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
-import { childElements, descendants, parseXml, NS_REL } from './xml';
+import { childElements, parseXml, NS_REL } from './xml';
 
 export type Parts = Map<string, Uint8Array>; // 경로는 앞의 '/' 없이
 
@@ -82,7 +82,7 @@ export function sheetInfos(parts: Parts): SheetInfo[] {
   const rels = relTargets(parts, relsPathOf(wbPath), dirOf(wbPath));
   const root = parseXml(text).documentElement;
   const out: SheetInfo[] = [];
-  for (const el of descendants(root, 'sheet')) {
+  for (const el of childElements(childElements(root, 'sheets')[0] ?? root, 'sheet')) {
     const rid = el.getAttributeNS(NS_REL, 'id');
     const rel = rels.find((r) => r.id === rid);
     if (!rel) continue;
