@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { mergeAction, numFmtKind, sizeInputStep, toolbarState } from '../../src/ui/Toolbar';
+import { CURRENCY_FMT, mergeAction, numFmtKind, sizeInputStep, toolbarState } from '../../src/ui/Toolbar';
+import { formatNumber } from '../../src/format/numfmt';
 import { formatArea } from '../../src/grid/selection';
 import { SheetGeometry } from '../../src/grid/geometry';
 import type { WorkbookModel } from '../../src/core/types';
@@ -52,10 +53,18 @@ describe('toolbarState', () => {
   });
 });
 
+describe('통화 형식', () => {
+  it('도구 막대 통화는 따옴표로 감싼 ₩이고 ₩1,234로 보인다', () => {
+    expect(CURRENCY_FMT).toBe('"₩"#,##0');
+    expect(formatNumber(1234, CURRENCY_FMT, false).text).toBe('₩1,234');
+  });
+});
+
 describe('numFmtKind', () => {
   it('형식 코드를 분류한다', () => {
     expect(numFmtKind('General')).toBe('general');
     expect(numFmtKind('₩#,##0')).toBe('currency');
+    expect(numFmtKind(CURRENCY_FMT)).toBe('currency');
     expect(numFmtKind('[$₩-412]#,##0')).toBe('currency');
     expect(numFmtKind('"$"#,##0.00')).toBe('currency');
     expect(numFmtKind('0%')).toBe('percent');

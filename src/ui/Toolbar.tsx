@@ -90,10 +90,12 @@ export function toolbarState(wb: WorkbookModel, sheet: number, anchor: { row: nu
 
 const DEFAULT_FONTS = ['맑은 고딕', 'Calibri', 'Arial', '굴림', '돋움', '바탕'];
 const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36];
+// 통화 기호는 따옴표로 감싼 글자로 쓴다(Excel이 기호를 형식 문자로 오해하지 않게)
+export const CURRENCY_FMT = '"₩"#,##0';
 const NUM_FORMATS: [string, string][] = [
   ['General', '일반'],
   ['#,##0', '숫자 (#,##0)'],
-  ['₩#,##0', '통화 (₩#,##0)'],
+  [CURRENCY_FMT, '통화 (₩#,##0)'],
   ['0%', '백분율 (0%)'],
   ['yyyy-mm-dd', '날짜 (yyyy-mm-dd)'],
   ['m"월" d"일"', '날짜 (m월 d일)'],
