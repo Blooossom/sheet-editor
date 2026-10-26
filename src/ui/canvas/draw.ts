@@ -28,6 +28,7 @@ export interface DrawView {
   mdw: number;
   plain: boolean; // csv·서식 없는 시트: 기본 글꼴, 세로 가운데
   measure(font: string): (s: string) => number; // 글꼴마다 캐시된 측정기
+  guide?: { kind: 'col' | 'row'; pos: number } | null; // 크기 조절 중 점선 가이드(캔버스 x 또는 y)
 }
 
 export const PAD_X = 3;
@@ -44,6 +45,7 @@ const EDITED = '#f59e0b';
 const EDITED_SIZE = 6;
 const SEL_LINE = '#1a73e8';
 const SEL_FILL = 'rgba(26, 115, 232, 0.08)';
+const GUIDE = '#1a73e8';
 const OVERFLOW_SCAN = 20; // 화면 밖 칸의 넘친 글자를 찾는 열 수
 
 export function textOrigin(rect: Rect, style: TextStyle, lineCount: number, lineHeight: number): { x: number; y: number } {
@@ -629,4 +631,23 @@ export function drawCells(ctx: CanvasRenderingContext2D, view: DrawView): void {
   if (g.freeze.rows > 0) ctx.fillRect(hw, hh + g.rowY(g.freeze.rows) - 1, view.size.w - hw, 1);
   drawHeaders(ctx, view);
   for (const r of rs) inRegion(ctx, r, () => drawSelection(ctx, view));
+  if (view.guide) drawGuide(ctx, view, view.guide);
+}
+
+function drawGuide(ctx: CanvasRenderingContext2D, v: DrawView, guide: { kind: 'col' | 'row'; pos: number }): void {
+  ctx.save();
+  ctx.strokeStyle = GUIDE;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  const p = Math.round(guide.pos) - 0.5;
+  if (guide.kind === 'col') {
+    ctx.moveTo(p, 0);
+    ctx.lineTo(p, v.size.h);
+  } else {
+    ctx.moveTo(0, p);
+    ctx.lineTo(v.size.w, p);
+  }
+  ctx.stroke();
+  ctx.restore();
 }

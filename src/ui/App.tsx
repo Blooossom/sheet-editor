@@ -22,8 +22,10 @@ import './app.css';
 
 type Unlisten = () => void;
 
-// 개발 확인용: 창 URL에 canvas=1이 있으면 캔버스 표를 읽기 전용으로 쓴다(Task 12에서 제거)
+// 개발 확인용: 창 URL에 canvas=1이 있으면 캔버스 표를 쓴다(Task 12에서 제거)
 const CANVAS_DEV = new URLSearchParams(window.location.search).get('canvas') === '1';
+// 캔버스 편집 시작·크기 조절은 아직 연결 전이다(Task 11·15·16)
+const logCanvasEvent = (e: unknown) => console.debug('canvas', e);
 
 function fileName(path: string | null): string {
   return path ? (path.split('/').pop() ?? path) : '제목 없음';
@@ -367,7 +369,19 @@ export function App() {
       />
       <FormulaBar store={store} selection={selection} />
       <div className="main">
-        {ready && CANVAS_DEV && <CanvasGrid key={current} store={store} sheet={current} rowView={view.rows} readonly />}
+        {ready && CANVAS_DEV && (
+          <CanvasGrid
+            key={current}
+            store={store}
+            sheet={current}
+            rowView={view.rows}
+            readonly={store.saving}
+            onSelect={onSelect}
+            onContextMenu={onContextMenu}
+            onResize={logCanvasEvent}
+            onStartEdit={logCanvasEvent}
+          />
+        )}
         {ready && !CANVAS_DEV && (
           <Grid
             key={current}

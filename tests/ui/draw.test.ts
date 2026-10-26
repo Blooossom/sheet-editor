@@ -252,3 +252,31 @@ describe('drawCells (가짜 캔버스)', () => {
     expect(texts.filter((t) => t.text === '제목')).toHaveLength(1);
   });
 });
+
+describe('drawCells: 크기 조절 가이드', () => {
+  function recordCtx() {
+    const calls: { name: string; args: unknown[] }[] = [];
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_t, prop) => (...args: unknown[]) => calls.push({ name: String(prop), args }),
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+    return { ctx, calls };
+  }
+  const geo = () =>
+    new SheetGeometry({ rowCount: 5, colCount: 5, rowView: null, rowHeight: () => 20, colWidth: () => 64, merges: [], freeze: { rows: 0, cols: 0 } });
+  const wb = () => makeWorkbook('xlsx', [{ name: 'a', grid: [['x']] }]);
+
+  it('가이드가 있으면 그 위치에 화면 높이만큼 점선을 긋는다', () => {
+    const { ctx, calls } = recordCtx();
+    drawCells(ctx, view(wb(), geo(), { guide: { kind: 'col', pos: 150 } }).v);
+    expect(calls.some((c) => c.name === 'setLineDash' && (c.args[0] as number[]).length > 0)).toBe(true);
+    expect(calls).toContainEqual({ name: 'moveTo', args: [149.5, 0] });
+    expect(calls).toContainEqual({ name: 'lineTo', args: [149.5, 600] });
+  });
+
+  it('가이드가 없으면 점선을 긋지 않는다', () => {
+    const { ctx, calls } = recordCtx();
+    drawCells(ctx, view(wb(), geo()).v);
+    expect(calls.some((c) => c.name === 'setLineDash')).toBe(false);
+  });
+});
