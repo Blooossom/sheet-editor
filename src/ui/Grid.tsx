@@ -185,7 +185,13 @@ export function Grid({ store, sheet, rowView, onSelect, onContextMenu }: Props) 
   const onPaste = useCallback(
     (target: Item, values: readonly (readonly string[])[]) => {
       if (store.saving) return false;
-      const { edits, dropped } = pasteEdits(target, values, sheet, rowView);
+      // Glide 대상은 [열(0 = 행 머리글), 화면 행]이다
+      const target0 = { row: target[1], col: Math.max(target[0], 1) - 1 };
+      const { edits, dropped, blocked } = pasteEdits(target0, values, sheet, rowView, store.wb.sheets[sheet].layout.merges);
+      if (blocked) {
+        void message(blocked, { kind: 'warning' });
+        return false;
+      }
       try {
         store.setCells(edits);
       } catch (e) {

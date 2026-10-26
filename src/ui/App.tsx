@@ -12,6 +12,7 @@ import { CanvasGrid } from './canvas/CanvasGrid';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { FormulaBar } from './FormulaBar';
 import { Grid, showError } from './Grid';
+import type { CellEdit } from './paste';
 import type { ContextMenuRequest, Selection } from './selectionTypes';
 import { SheetTabs } from './SheetTabs';
 import { SidePanel } from './SidePanel';
@@ -24,7 +25,7 @@ type Unlisten = () => void;
 
 // 개발 확인용: 창 URL에 canvas=1이 있으면 캔버스 표를 쓴다(Task 12에서 제거)
 const CANVAS_DEV = new URLSearchParams(window.location.search).get('canvas') === '1';
-// 캔버스 편집 시작·크기 조절은 아직 연결 전이다(Task 11·15·16)
+// 캔버스 크기 조절은 아직 연결 전이다(Task 15·16)
 const logCanvasEvent = (e: unknown) => console.debug('canvas', e);
 
 function fileName(path: string | null): string {
@@ -32,7 +33,8 @@ function fileName(path: string | null): string {
 }
 
 function isTextInput(el: Element | null): boolean {
-  if (el instanceof HTMLTextAreaElement) return true;
+  // 캔버스 표의 숨은 입력창은 편집 중이 아닐 때 표 자체로 본다(되돌리기·행 삭제 단축키가 표에 적용되도록)
+  if (el instanceof HTMLTextAreaElement) return !('gridIdle' in el.dataset);
   return el instanceof HTMLInputElement && ['text', 'search', 'number', 'email', 'tel', 'url', 'password'].includes(el.type);
 }
 
@@ -294,6 +296,20 @@ export function App() {
     setSelection(sel);
   }, []);
 
+  // 캔버스 표의 편집 확정·붙여넣기(Glide 표의 편집 처리와 같은 규칙: 저장 중이면 무시, 한 번이 되돌리기 한 단계)
+  const onCanvasCommit = useCallback(
+    (edits: CellEdit[]) => {
+      if (store.saving) return;
+      try {
+        store.setCells(edits);
+      } catch (e) {
+        showError(e);
+      }
+    },
+    [store],
+  );
+  const onCanvasWarning = useCallback((text: string) => void message(text, { kind: 'warning' }), []);
+
   const onQuery = useCallback(
     (query: string) => {
       if (query !== viewRef.current.query) updateView({ query });
@@ -379,7 +395,8 @@ export function App() {
             onSelect={onSelect}
             onContextMenu={onContextMenu}
             onResize={logCanvasEvent}
-            onStartEdit={logCanvasEvent}
+            onCommit={onCanvasCommit}
+            onWarning={onCanvasWarning}
           />
         )}
         {ready && !CANVAS_DEV && (

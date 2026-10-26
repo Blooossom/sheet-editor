@@ -1,27 +1,25 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { editText } from '../../core/display';
 import type { DocumentStore } from '../../document/store';
 import { SheetGeometry } from '../../grid/geometry';
 import { colEdgeX, hitTest, pointToCell, rowEdgeY } from '../../grid/hit';
 import { contextTarget, gridKeyAction, resizeTargets } from '../../grid/interaction';
 import { colWidthPx, defaultColWidthPx, maxDigitWidth, rowHeightPx } from '../../grid/metrics';
-import { StyleResolver } from '../../grid/resolve';
-import { expandForMerges, move, toSelection, type GridSel } from '../../grid/selection';
+import { effectiveXf, StyleResolver } from '../../grid/resolve';
+import { expandForMerges, move, toSelection, type GridSel, type MoveKey } from '../../grid/selection';
 import { makeMeasure } from '../../grid/textLayout';
 import { colInfo } from '../../xlsx/layout';
+import { pasteEdits, type CellEdit } from '../paste';
 import type { ContextMenuRequest, Selection } from '../selectionTypes';
 import { useStore } from '../useStore';
-import { drawCells, isPlainSheet, type DrawView } from './draw';
+import { CellEditor, editorBox, editorKeyAction, type EditorKeyAction } from './CellEditor';
+import { copyText, parseTsv } from './clipboard';
+import { drawCells, horizontalOf, isPlainSheet, lineHeightOf, PAD_X, PAD_Y, PLAIN_FONT, type DrawView } from './draw';
 import './canvas.css';
 
 export type ResizeEvent =
   | { kind: 'col'; cols: number[]; px: number }
   | { kind: 'row'; rows: number[] /* 원래 행 */; px: number };
-
-export interface StartEditEvent {
-  row: number; // 원래 행(병합이면 앵커 칸)
-  col: number;
-  initial?: string; // 타이핑으로 시작한 글자
-}
 
 export interface CanvasGridProps {
   store: DocumentStore;
@@ -32,8 +30,29 @@ export interface CanvasGridProps {
   onSelect(sel: Selection): void;
   onContextMenu(e: ContextMenuRequest): void;
   onResize?(e: ResizeEvent): void;
-  onStartEdit(e: StartEditEvent): void;
+  /** 편집기 확정·붙여넣기·잘라내기로 바뀐 칸(원래 행). 한 번 호출이 되돌리기 한 단계다. */
+  onCommit(edits: CellEdit[]): void;
+  /** 붙여넣기를 막았거나 일부를 버렸을 때 사용자에게 보여 줄 문구 */
+  onWarning(message: string): void;
 }
+
+export interface CanvasGridHandle {
+  /** 편집 중인 칸을 확정한다(저장·닫기 전). 편집 중이 아니면 아무것도 하지 않는다. */
+  commitEditor(): void;
+}
+
+/** 편집 중인 칸. row는 화면 행, orig는 원래 행(병합이면 앵커 칸) */
+interface Editing {
+  row: number;
+  col: number;
+  orig: number;
+  original: string; // 편집을 시작할 때의 편집 문자열(바뀌지 않았으면 확정하지 않는다)
+}
+
+const COMMIT_MOVE: Partial<Record<EditorKeyAction, MoveKey>> = {
+  commitDown: 'Enter', commitUp: 'ShiftEnter', commitRight: 'Tab', commitLeft: 'ShiftTab',
+};
+const CARET_SLACK = 2; // 글자 끝 캐럿 자리
 
 const PLAIN_COL = 120;
 const PLAIN_ROW = 24;
@@ -54,14 +73,22 @@ type Drag =
 const sameSel = (a: GridSel, b: GridSel) =>
   a.mode === b.mode && a.anchor.row === b.anchor.row && a.anchor.col === b.anchor.col && a.focus.row === b.focus.row && a.focus.col === b.focus.col;
 
-export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSelect, onContextMenu, onResize, onStartEdit }: CanvasGridProps) {
+export const CanvasGrid = forwardRef<CanvasGridHandle, CanvasGridProps>(function CanvasGrid(
+  { store, sheet, rowView, readonly, sessionSizes, onSelect, onContextMenu, onResize, onCommit, onWarning },
+  ref,
+) {
   const version = useStore(store);
   const wb = store.wb;
   const model = wb.sheets[sheet];
   const scrollerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [sel, setSel] = useState<GridSel>(INITIAL_SEL);
+  const [editing, setEditing] = useState<Editing | null>(null);
+  const editingRef = useRef<Editing | null>(null);
+  const composingRef = useRef(false); // 입력창에서 한글 등 조합이 진행 중
+  const blurQuiet = useRef(false);
 
   const plain = isPlainSheet(wb);
   const mdw = useMemo(() => (plain ? 7 : maxDigitWidth(wb.styles.fonts[0])), [plain, wb.styles]);
@@ -156,6 +183,56 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
       guide: guide.current,
     };
     drawCells(ctx, view);
+    placeRef.current();
+  };
+
+  /**
+   * 입력창을 칸 위에 놓는다. 편집 중이 아니면 선택 칸 위에 보이지 않게(한글 조합 후보 창이 칸 옆에 뜨도록),
+   * 편집 중이면 칸(병합 전체)의 글꼴·정렬·색으로 보이게 두고 내용에 맞춰 늘린다.
+   */
+  const placeRef = useRef<() => void>(() => {});
+  placeRef.current = () => {
+    const el = inputRef.current;
+    const scroller = scrollerRef.current;
+    if (!el || !scroller) return;
+    const { geometry: g, sel: s, size: sz, headerW: hw } = live.current;
+    const ed = editingRef.current;
+    const at = ed ?? anchorOf(s.anchor.row, s.anchor.col);
+    const r = g.cellRect(at.row, at.col);
+    const x = hw + r.x - (at.col >= g.freeze.cols ? scroller.scrollLeft : 0);
+    const y = HEADER_H + r.y - (at.row >= g.freeze.rows ? scroller.scrollTop : 0);
+    const st = el.style;
+    if (!ed) {
+      // 화면 밖에 두면 입력 때 브라우저가 보이게 하려고 스크롤할 수 있으므로 화면 안으로 당긴다
+      st.left = `${Math.min(Math.max(x, hw), Math.max(hw, sz.w - 1))}px`;
+      st.top = `${Math.min(Math.max(y, HEADER_H), Math.max(HEADER_H, sz.h - 1))}px`;
+      st.width = `${Math.max(1, r.w)}px`;
+      st.height = `${Math.max(1, r.h)}px`;
+      return;
+    }
+    const style = resolver.get(effectiveXf(model, ed.orig, ed.col));
+    const cell = model.cells.get(ed.orig)?.get(ed.col);
+    const font = plain ? PLAIN_FONT : style.font;
+    const lineH = lineHeightOf(font);
+    const vAlign = plain ? 'center' : style.vAlign;
+    const wrap = !plain && style.wrap;
+    const free = r.h - el.value.split('\n').length * lineH - 2 * PAD_Y;
+    const padTop = PAD_Y + (vAlign === 'top' || free <= 0 ? 0 : vAlign === 'bottom' ? free : free / 2);
+    st.font = font;
+    st.lineHeight = `${lineH}px`;
+    st.color = style.color;
+    st.background = style.fill ?? '#ffffff';
+    st.textAlign = horizontalOf(style, cell ?? { value: null });
+    st.whiteSpace = wrap ? 'pre-wrap' : 'pre';
+    st.padding = `${padTop}px ${PAD_X}px ${PAD_Y}px`;
+    // 칸 크기로 줄여 놓고 내용 크기를 잰 뒤 늘린다
+    st.left = `${x}px`;
+    st.top = `${y}px`;
+    st.width = `${r.w}px`;
+    st.height = `${r.h}px`;
+    const box = editorBox({ x, y, w: r.w, h: r.h }, { w: el.scrollWidth + CARET_SLACK, h: el.scrollHeight }, sz, wrap);
+    st.width = `${box.w}px`;
+    st.height = `${box.h}px`;
   };
 
   const frame = useRef(0);
@@ -194,8 +271,8 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
     return () => ro.disconnect();
   }, []);
 
-  // 처음부터 방향키가 먹도록 표에 포커스를 둔다
-  useEffect(() => scrollerRef.current?.focus({ preventScroll: true }), []);
+  // 처음부터 방향키가 먹도록 표의 입력창에 포커스를 둔다
+  useEffect(() => inputRef.current?.focus({ preventScroll: true }), []);
 
   // ── 선택 ────────────────────────────────────────────────
 
@@ -258,13 +335,61 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
 
   const origRow = (d: number) => live.current.geometry.origRowOf(d);
 
-  const startEdit = (initial?: string) => {
-    if (readonly) return;
+  // ── 편집기 ──────────────────────────────────────────────
+
+  /**
+   * 선택 앵커 칸(병합이면 앵커)에서 편집을 시작한다. keep은 기존 값을 넣고(더블클릭·F2),
+   * replace는 입력창에 이미 들어온(또는 곧 들어올) 글자로 기존 값을 대체한다(타이핑·조합 시작).
+   */
+  const openEditor = (mode: 'keep' | 'replace'): boolean => {
+    const el = inputRef.current;
+    if (readonly || !el || editingRef.current) return false;
     const a = anchorOf(live.current.sel.anchor.row, live.current.sel.anchor.col);
-    const row = origRow(a.row);
-    if (row === undefined) return;
-    onStartEdit(initial === undefined ? { row, col: a.col } : { row, col: a.col, initial });
+    const orig = origRow(a.row);
+    if (orig === undefined) return false;
+    const original = editText(model.cells.get(orig)?.get(a.col), wb);
+    select({ anchor: a, focus: { ...a }, mode: 'cells' });
+    reveal(a.row, a.col);
+    const ed: Editing = { row: a.row, col: a.col, orig, original };
+    editingRef.current = ed;
+    setEditing(ed);
+    if (mode === 'keep') {
+      el.value = original;
+      el.setSelectionRange(original.length, original.length);
+    }
+    placeRef.current();
+    return true;
   };
+
+  /** 편집을 끝낸다. commit이고 값이 바뀌었으면 onCommit으로 보낸다. 편집 중이었으면 true. */
+  const closeEditor = (commit: boolean): boolean => {
+    const ed = editingRef.current;
+    const el = inputRef.current;
+    if (!ed || !el) return false;
+    if (composingRef.current && document.activeElement === el) {
+      // 조합 중에 닫으면(다른 칸 클릭 등) 먼저 조합을 확정한다. 그대로 비우면 IME가 남은 글자를 빈 입력창에 다시 넣어
+      // 다음 칸에 한 번 더 입력된다. 포커스를 잠깐 뺐다 돌려주면 WebKit이 조합을 끝낸다.
+      blurQuiet.current = true;
+      el.blur();
+      el.focus({ preventScroll: true });
+      blurQuiet.current = false;
+    }
+    const value = el.value;
+    editingRef.current = null;
+    setEditing(null);
+    el.value = '';
+    el.scrollTop = 0;
+    el.scrollLeft = 0;
+    if (commit && value !== ed.original) onCommit([{ sheet, row: ed.orig, col: ed.col, input: value }]);
+    placeRef.current();
+    return true;
+  };
+
+  const closeRef = useRef(closeEditor);
+  closeRef.current = closeEditor;
+  useImperativeHandle(ref, () => ({ commitEditor: () => void closeRef.current(true) }), []);
+  // 시트를 바꾸는 등으로 표가 사라질 때 편집 중이던 값을 잃지 않는다(레이아웃 정리는 입력창 ref가 떨어지기 전에 돈다)
+  useLayoutEffect(() => () => void closeRef.current(true), []);
 
   // ── 마우스 ──────────────────────────────────────────────
 
@@ -311,7 +436,8 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    scrollerRef.current?.focus({ preventScroll: true });
+    closeEditor(true); // 다른 곳을 누르면 편집을 확정한다
+    inputRef.current?.focus({ preventScroll: true });
     if (e.button !== 0 || e.ctrlKey) return; // 오른쪽 버튼·⌃클릭은 contextmenu에서 처리한다
     const { geometry: g, headerW: hw, sel: s, lastRow: lr, lastCol: lc } = live.current;
     const p = local(e);
@@ -402,7 +528,7 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
     if (hit.kind !== 'cell' || hit.row === undefined || hit.col === undefined) return;
     const a = anchorOf(hit.row, hit.col);
     select({ anchor: a, focus: { ...a }, mode: 'cells' });
-    startEdit();
+    openEditor('keep');
   };
 
   const onCanvasContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -418,22 +544,14 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
 
   // ── 키보드 ──────────────────────────────────────────────
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const { key, shiftKey, metaKey, ctrlKey, keyCode } = e;
-    const action = gridKeyAction({ key, shiftKey, metaKey, ctrlKey, keyCode, isComposing: e.nativeEvent.isComposing });
-    if (!action) return;
-    e.preventDefault();
-    if (action.kind === 'edit') {
-      startEdit(action.initial);
-      return;
-    }
+  const moveSel = (key: MoveKey, extend: boolean, jump: boolean) => {
     const { geometry: g, sel: s, size: sz, headerW: hw, lastRow: lr, lastCol: lc } = live.current;
     const sc = scroll();
     const fh = g.rowY(g.freeze.rows);
     const v = g.visible(0, fh + sc.y, Math.max(0, sz.w - hw), Math.max(0, sz.h - HEADER_H - fh));
-    const next = move(s, action.key, {
-      extend: e.shiftKey,
-      jump: e.metaKey,
+    const next = move(s, key, {
+      extend,
+      jump,
       pageRows: Math.max(1, v.r2 - v.r1),
       geo: g,
       lastRow: lr,
@@ -449,23 +567,169 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
     reveal(next.mode === 'cols' ? -1 : f.row, next.mode === 'rows' ? -1 : f.col);
   };
 
+  /** ⌥Enter: 캐럿 자리에 줄바꿈을 넣는다(편집기의 되돌리기 기록에 남도록 insertText를 먼저 쓴다) */
+  const insertNewline = (el: HTMLTextAreaElement) => {
+    if (!document.execCommand('insertText', false, '\n')) {
+      el.setRangeText('\n', el.selectionStart, el.selectionEnd, 'end');
+      placeRef.current();
+    }
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const { key, altKey, shiftKey, metaKey, ctrlKey, keyCode } = e;
+    const isComposing = e.nativeEvent.isComposing;
+    if (editingRef.current) {
+      const act = editorKeyAction({ key, altKey, shiftKey, metaKey, isComposing, keyCode });
+      if (act === 'none') return; // 글자 입력·캐럿 이동·조합은 textarea가 처리한다
+      e.preventDefault();
+      if (act === 'cancel') closeEditor(false);
+      else if (act === 'newline') insertNewline(e.currentTarget);
+      else {
+        closeEditor(true);
+        moveSel(COMMIT_MOVE[act]!, false, false);
+      }
+      return;
+    }
+    // 조합 키(229)는 null — compositionstart가 편집을 연다
+    const action = gridKeyAction({ key, shiftKey, metaKey, ctrlKey, keyCode, isComposing });
+    if (!action) return;
+    if (action.kind === 'edit') {
+      if (action.initial === undefined) {
+        e.preventDefault();
+        openEditor('keep');
+      } else if (!openEditor('replace')) e.preventDefault();
+      // 타이핑은 기본 동작으로 둔다: 빈 입력창에 글자가 그대로 들어가 기존 값을 대체한다
+      return;
+    }
+    e.preventDefault();
+    moveSel(action.key, shiftKey, metaKey);
+  };
+
+  /** 편집 중이 아닐 때 들어온 글자(받침 글쇠·받아쓰기 등 keydown 없이 들어온 입력)도 편집으로 이어 간다 */
+  const onInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
+    const el = e.currentTarget;
+    if (editingRef.current) {
+      placeRef.current();
+      return;
+    }
+    if (el.value === '') return;
+    if (!openEditor('replace') && !(e.nativeEvent as InputEvent).isComposing) el.value = '';
+  };
+
+  const onCompositionStart = () => {
+    composingRef.current = true;
+    if (!editingRef.current) openEditor('replace'); // 같은 입력창에서 조합이 이어지므로 첫 글자를 잃지 않는다
+  };
+
+  const onCompositionEnd = (e: React.CompositionEvent<HTMLTextAreaElement>) => {
+    composingRef.current = false;
+    if (!editingRef.current) e.currentTarget.value = ''; // 읽기 전용이라 편집을 못 연 조합은 버린다
+  };
+
+  const onBlur = () => {
+    // 조합 확정용으로 잠깐 뺀 포커스, 창 전환(앱 바꾸기)으로 잃은 포커스는 편집을 유지한다
+    if (!blurQuiet.current && document.hasFocus()) closeEditor(true);
+  };
+
+  // ── 복사·붙여넣기 ─────────────────────────────────────
+
+  /** 복사·잘라내기 범위(화면 행). 행·열 선택은 데이터가 있는 곳까지로 줄인다. */
+  const clipRange = () => {
+    const { geometry: g, sel: s } = live.current;
+    const r = expandForMerges(s, g);
+    const lastDataRow = (rowView ? rowView.length : model.rowCount) - 1;
+    return {
+      r1: r.r1,
+      c1: r.c1,
+      r2: Math.max(r.r1, Math.min(r.r2, lastDataRow)),
+      c2: Math.max(r.c1, Math.min(r.c2, model.colCount - 1)),
+    };
+  };
+
+  const onCopy = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (editingRef.current) return; // 편집 중에는 글자 복사
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', copyText(wb, sheet, clipRange(), rowView));
+  };
+
+  const onCut = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (editingRef.current) return;
+    onCopy(e);
+    if (readonly) return;
+    const r = clipRange();
+    const edits: CellEdit[] = [];
+    for (let d = r.r1; d <= r.r2; d++) {
+      const row = origRow(d);
+      const cells = row === undefined ? undefined : model.cells.get(row);
+      if (row === undefined || !cells) continue;
+      for (let c = r.c1; c <= r.c2; c++) if (cells.has(c)) edits.push({ sheet, row, col: c, input: '' });
+    }
+    if (edits.length > 0) onCommit(edits);
+  };
+
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (editingRef.current) return; // 편집 중에는 글자 붙여넣기
+    e.preventDefault();
+    if (readonly) return;
+    const text = e.clipboardData.getData('text/plain');
+    if (text === '') return;
+    const r = expandForMerges(live.current.sel, live.current.geometry);
+    const { edits, dropped, blocked } = pasteEdits({ row: r.r1, col: r.c1 }, parseTsv(text), sheet, rowView, model.layout.merges);
+    if (blocked) {
+      onWarning(blocked);
+      return;
+    }
+    if (edits.length > 0) onCommit(edits);
+    if (dropped > 0) onWarning(`보이는 행이 모자라 ${dropped}줄은 붙여 넣지 않았습니다.`);
+  };
+
+  // WebKit은 선택된 글자가 없으면 복사·잘라내기 메뉴를 끈다. before* 이벤트를 막으면 켜진다(편집 중이 아닐 때만).
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const enable = (e: Event) => {
+      if (!editingRef.current) e.preventDefault();
+    };
+    el.addEventListener('beforecopy', enable);
+    el.addEventListener('beforecut', enable);
+    return () => {
+      el.removeEventListener('beforecopy', enable);
+      el.removeEventListener('beforecut', enable);
+    };
+  }, []);
+
   return (
-    <div className="canvas-grid" ref={scrollerRef} tabIndex={0} onScroll={schedule} onKeyDown={onKeyDown}>
+    <div className="canvas-grid" ref={scrollerRef} onScroll={schedule}>
       <div
         className="canvas-grid-spacer"
         style={{ width: Math.max(headerW + geometry.totalWidth, size.w), height: Math.max(HEADER_H + geometry.totalHeight, size.h) }}
       >
-        <canvas
-          ref={canvasRef}
-          style={{ width: size.w, height: size.h }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onDoubleClick={onDoubleClick}
-          onContextMenu={onCanvasContextMenu}
-        />
+        <div className="canvas-grid-view" style={{ width: size.w, height: size.h }}>
+          <canvas
+            ref={canvasRef}
+            style={{ width: size.w, height: size.h }}
+            onMouseDown={(e) => e.preventDefault() /* 포커스를 입력창에 남긴다 */}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onDoubleClick={onDoubleClick}
+            onContextMenu={onCanvasContextMenu}
+          />
+          <CellEditor
+            ref={inputRef}
+            editing={editing !== null}
+            onKeyDown={onKeyDown}
+            onInput={onInput}
+            onCompositionStart={onCompositionStart}
+            onCompositionEnd={onCompositionEnd}
+            onBlur={onBlur}
+            onCopy={onCopy}
+            onCut={onCut}
+            onPaste={onPaste}
+          />
+        </div>
       </div>
     </div>
   );
-}
+});

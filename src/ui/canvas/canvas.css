@@ -5,10 +5,40 @@
   overflow: auto;
 }
 
-/* 전체 크기 spacer 안에서 캔버스는 화면 크기로 고정되어 스크롤을 따라온다 */
-.canvas-grid canvas {
+/* 전체 크기 spacer 안에서 화면 크기의 층(캔버스 + 입력창)이 스크롤을 따라온다 */
+.canvas-grid-view {
   position: sticky;
   top: 0;
   left: 0;
+  overflow: hidden;
+}
+
+.canvas-grid canvas {
   display: block;
+}
+
+/* 편집 중이 아닐 때는 보이지 않는 키보드 대상(한글 조합을 받는다) */
+.cell-editor {
+  position: absolute;
+  box-sizing: border-box;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  resize: none;
+  overflow: hidden;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.cell-editor.editing {
+  opacity: 1;
+  pointer-events: auto;
+  caret-color: auto;
+  box-shadow: 0 0 0 2px #1a73e8;
 }
