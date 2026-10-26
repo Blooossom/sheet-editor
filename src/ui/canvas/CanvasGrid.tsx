@@ -12,7 +12,7 @@ import { colInfo } from '../../xlsx/layout';
 import { pasteEdits, type CellEdit } from '../paste';
 import type { ContextMenuRequest, Selection } from '../selectionTypes';
 import { useStore } from '../useStore';
-import { CellEditor, editorBox, editorKeyAction, type EditorKeyAction } from './CellEditor';
+import { CellEditor, editorBox, editorKeyAction, idleInputAction, type EditorKeyAction } from './CellEditor';
 import { copyText, parseTsv } from './clipboard';
 import { drawCells, horizontalOf, isPlainSheet, lineHeightOf, PAD_X, PAD_Y, PLAIN_FONT, type DrawView } from './draw';
 import './canvas.css';
@@ -612,8 +612,10 @@ export const CanvasGrid = forwardRef<CanvasGridHandle, CanvasGridProps>(function
       placeRef.current();
       return;
     }
-    if (el.value === '') return;
-    if (!openEditor('replace') && !(e.nativeEvent as InputEvent).isComposing) el.value = '';
+    const composing = composingRef.current;
+    const act = idleInputAction({ inputType: (e.nativeEvent as InputEvent).inputType ?? '', composing, value: el.value });
+    if (act === 'discard') el.value = '';
+    else if (act === 'open' && !openEditor('replace') && !composing) el.value = '';
   };
 
   const onCompositionStart = () => {

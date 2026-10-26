@@ -44,7 +44,8 @@ export function pasteEdits(
   const host = t === undefined ? undefined : merges.find((m) => contains(m, t, startCol));
   if (host) {
     const d = rowView ? rowView.indexOf(host.r1) : host.r1;
-    if (d >= 0) startRow = d; // 앵커 행이 필터로 숨었으면 그 자리에서 시작한다(앵커가 아닌 칸 값은 아래에서 버린다)
+    if (d < 0) return { edits: [], dropped: 0, blocked: MERGE_PARTIAL }; // 앵커 행이 필터로 숨어 앵커에 넣을 수 없다
+    startRow = d;
     startCol = host.c1;
   }
 

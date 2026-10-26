@@ -17,6 +17,18 @@ export function editorKeyAction(e: { key: string; altKey: boolean; shiftKey: boo
 }
 
 /**
+ * 편집 중이 아닐 때 입력창에 글자가 들어온 경우 할 일. 진짜 조합은 언제나 compositionstart가 먼저 오므로(composing),
+ * 조합 시작 없이 들어온 조합 글자는 닫힌 편집기의 늦은 확정이다 — 편집을 열면 다음 칸에 같은 글자가 한 번 더 들어간다.
+ * 줄바꿈(Ctrl+O 등)도 편집을 열지 않는다.
+ */
+export function idleInputAction(e: { inputType: string; composing: boolean; value: string }): 'open' | 'discard' | 'ignore' {
+  if (e.value === '') return 'ignore';
+  if (e.composing) return 'open';
+  if (e.inputType === 'insertCompositionText' || e.inputType === 'insertFromComposition' || e.inputType === 'insertLineBreak') return 'discard';
+  return 'open';
+}
+
+/**
  * 편집기 사각형. 칸(병합이면 병합 전체) 위에서 시작해 내용이 넘치면 오른쪽·아래로 늘어나되 view(뷰포트 크기, 같은 좌표계) 끝을 넘지 않는다.
  * 줄 바꿈 칸은 너비를 늘리지 않는다. 칸 자체가 화면보다 크면 칸 크기를 유지한다.
  */

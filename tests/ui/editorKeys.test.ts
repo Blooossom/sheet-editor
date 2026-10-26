@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editorBox, editorKeyAction } from '../../src/ui/canvas/CellEditor';
+import { editorBox, editorKeyAction, idleInputAction } from '../../src/ui/canvas/CellEditor';
 
 const key = (k: string, o: Partial<{ altKey: boolean; shiftKey: boolean; metaKey: boolean; isComposing: boolean; keyCode: number }> = {}) => ({
   key: k,
@@ -39,6 +39,26 @@ describe('editorKeyAction', () => {
     expect(editorKeyAction(key('a', { keyCode: 65 }))).toBe('none');
     expect(editorKeyAction(key('ArrowLeft', { keyCode: 37 }))).toBe('none');
     expect(editorKeyAction(key('Backspace', { keyCode: 8 }))).toBe('none');
+  });
+});
+
+describe('idleInputAction', () => {
+  it('조합 시작 없이 늦게 들어온 조합 글자는 버린다(다음 칸에 두 번 입력 방지)', () => {
+    expect(idleInputAction({ inputType: 'insertCompositionText', composing: false, value: '한' })).toBe('discard');
+    expect(idleInputAction({ inputType: 'insertFromComposition', composing: false, value: '한' })).toBe('discard');
+  });
+
+  it('조합 중 글자는 편집을 연다', () => {
+    expect(idleInputAction({ inputType: 'insertCompositionText', composing: true, value: 'ㅎ' })).toBe('open');
+  });
+
+  it('편집 중이 아닐 때 들어온 줄바꿈(Ctrl+O)은 버린다', () => {
+    expect(idleInputAction({ inputType: 'insertLineBreak', composing: false, value: '\n' })).toBe('discard');
+  });
+
+  it('보통 글자 입력은 편집을 열고, 빈 값은 무시한다', () => {
+    expect(idleInputAction({ inputType: 'insertText', composing: false, value: 'é' })).toBe('open');
+    expect(idleInputAction({ inputType: 'deleteContentBackward', composing: false, value: '' })).toBe('ignore');
   });
 });
 

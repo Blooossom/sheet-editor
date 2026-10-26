@@ -62,6 +62,13 @@ describe('pasteEdits 병합 규칙', () => {
     expect(r.edits).toEqual([]);
   });
 
+  it('대상 병합의 앵커 행이 필터로 숨었으면 막는다', () => {
+    // 보이는 행 0,2 → 화면 1행은 원래 2행(병합 B2:C3 안), 앵커 원래 1행은 숨음
+    const r = pasteEdits({ row: 1, col: 1 }, [['v']], 0, [0, 2], merges);
+    expect(r.blocked).toBe('병합된 셀의 일부는 바꿀 수 없습니다.');
+    expect(r.edits).toEqual([]);
+  });
+
   it('병합과 겹치지 않으면 그대로 붙여 넣는다', () => {
     const r = pasteEdits({ row: 5, col: 0 }, [['x', 'y']], 0, null, merges);
     expect(r.edits).toEqual([
