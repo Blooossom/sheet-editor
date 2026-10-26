@@ -127,11 +127,9 @@ export function lineHeightOf(font: string): number {
   return Math.round((m ? Number(m[1]) : 13) * 1.2);
 }
 
-/** csv, 또는 서식(xf)과 열·행 크기 정보가 없는 시트는 1차와 비슷한 기본 모습으로 그린다. */
-export function isPlainSheet(wb: WorkbookModel, sheet: SheetModel): boolean {
-  if (wb.kind === 'csv') return true;
-  const l = sheet.layout;
-  return wb.styles.xfs.length <= 1 && l.colRuns.length === 0 && l.rows.size === 0 && l.defaultColWidth === undefined;
+/** csv는 1차와 비슷한 기본 모습으로 그린다. xlsx(새 문서 포함)는 서식이 없어도 Excel 크기를 쓴다. */
+export function isPlainSheet(wb: WorkbookModel): boolean {
+  return wb.kind === 'csv';
 }
 
 // ── 그리기 ────────────────────────────────────────────────
@@ -175,16 +173,48 @@ function hasValue(cell: Cell | undefined): cell is Cell {
   return !!cell && cell.value !== null && cell.value !== '';
 }
 
-/** 화면에서 실제로 합쳐져 보이는 병합(필터로 끊긴 병합은 낱칸으로 본다). */
-function mergeShown(v: DrawView, d: number, c: number): { m: CellRange; rect: Rect } | null {
+interface MergeInfo {
+  rect: Rect | null; // 화면에서 합쳐져 보이면 병합 사각형(숨김으로 한 칸이 되었어도 병합으로 그린다)
+  host: { d: number; c: number } | null; // 필터로 끊긴 병합: 앵커 값을 그릴 첫 보이는 칸
+}
+
+// 병합 정보는 화면 행 배치(geometry)에만 달려 있어 프레임 사이에 재사용한다
+const mergeCache = new WeakMap<SheetGeometry, Map<CellRange, MergeInfo>>();
+
+function mergeInfo(v: DrawView, m: CellRange, d: number, c: number): MergeInfo {
   const g = v.geometry;
-  const m = g.mergeAt(origOf(v, d), c);
+  let cache = mergeCache.get(g);
+  if (!cache) mergeCache.set(g, (cache = new Map()));
+  let info = cache.get(m);
+  if (info) return info;
+  const rv = v.rowView;
+  let contiguous = true;
+  if (rv) {
+    const d1 = g.displayRowOf(m.r1);
+    contiguous = d1 !== null;
+    for (let r = m.r1; contiguous && r <= m.r2; r++) contiguous = rv[d1! + (r - m.r1)] === r;
+  }
+  if (contiguous) info = { rect: g.cellRect(d, c), host: null };
+  else {
+    let host: MergeInfo['host'] = null;
+    let hc = -1;
+    for (let k = m.c1; k <= m.c2; k++) if (g.colX(k + 1) > g.colX(k)) { hc = k; break; }
+    for (let r = m.r1; hc >= 0 && r <= m.r2; r++) {
+      const hd = g.displayRowOf(r);
+      if (hd !== null && g.rowY(hd + 1) > g.rowY(hd)) { host = { d: hd, c: hc }; break; }
+    }
+    info = { rect: null, host };
+  }
+  cache.set(m, info);
+  return info;
+}
+
+/** 화면에서 합쳐져 보이는 병합. 필터로 끊긴 병합은 null(낱칸으로 그린다). */
+function mergeShown(v: DrawView, d: number, c: number): { m: CellRange; rect: Rect } | null {
+  const m = v.geometry.mergeAt(origOf(v, d), c);
   if (!m) return null;
-  const rect = g.cellRect(d, c);
-  const single = rect.x === g.colX(c) && rect.y === g.rowY(d) && rect.w === g.colX(c + 1) - g.colX(c) && rect.h === g.rowY(d + 1) - g.rowY(d);
-  // 필터로 끊겼거나 나머지 칸이 모두 숨겨져 한 칸 크기면 낱칸으로 그린다
-  if (single && (m.r1 !== m.r2 || m.c1 !== m.c2)) return null;
-  return { m, rect };
+  const rect = mergeInfo(v, m, d, c).rect;
+  return rect ? { m, rect } : null;
 }
 
 function styleOf(v: DrawView, sheet: SheetModel, row: number, col: number): ResolvedStyle {
@@ -325,16 +355,25 @@ function drawTexts(ctx: CanvasRenderingContext2D, v: DrawView, sheet: SheetModel
     const rowCells = sheet.cells.get(orig);
     const h = g.rowY(d + 1) - g.rowY(d);
     // 병합: 앵커 값·서식으로 병합 전체에 그린다(넘치지 않음)
+    // 필터로 끊긴 병합은 첫 보이는 칸에만 앵커 값을 그린다
     for (let c = r.cols[0]; c <= r.cols[1]; c++) {
-      const merged = mergeShown(v, d, c);
-      if (!merged) continue;
-      const key = `${merged.m.r1},${merged.m.c1}`;
-      if (done.has(key)) continue;
-      done.add(key);
-      const anchor = cellAt(sheet, merged.m.r1, merged.m.c1);
+      const m = g.mergeAt(orig, c);
+      if (!m) continue;
+      const info = mergeInfo(v, m, d, c);
+      let rect: Rect;
+      if (info.rect) {
+        const key = `${m.r1},${m.c1}`;
+        if (done.has(key)) continue;
+        done.add(key);
+        rect = info.rect;
+      } else {
+        if (!info.host || info.host.d !== d || info.host.c !== c) continue;
+        rect = { x: g.colX(c), y: g.rowY(d), w: colWidth(c), h };
+      }
+      const anchor = cellAt(sheet, m.r1, m.c1);
       if (!hasValue(anchor)) continue;
-      const job = makeJob(v, anchor, styleOf(v, sheet, merged.m.r1, merged.m.c1), merged.rect);
-      paintText(ctx, v, { ...job, clip: merged.rect, lines: layoutLines(v, job, merged.rect, typeof anchor.value === 'number') });
+      const job = makeJob(v, anchor, styleOf(v, sheet, m.r1, m.c1), rect);
+      paintText(ctx, v, { ...job, clip: rect, lines: layoutLines(v, job, rect, typeof anchor.value === 'number') });
     }
     if (!rowCells || h <= 0) continue;
     const from = Math.max(0, r.cols[0] - OVERFLOW_SCAN);
@@ -346,10 +385,16 @@ function drawTexts(ctx: CanvasRenderingContext2D, v: DrawView, sheet: SheetModel
       const rect = { x: g.colX(c), y: g.rowY(d), w: colWidth(c), h };
       if (rect.w <= 0) continue;
       const inside = c >= r.cols[0] && c <= r.cols[1];
-      const job = makeJob(v, cell, styleOf(v, sheet, orig, c), rect);
+      const style = styleOf(v, sheet, orig, c);
       const isNumber = typeof cell.value === 'number';
+      if (!inside) {
+        // 화면 밖 칸은 화면 쪽으로 넘칠 수 있는 글자만 본다
+        if (isNumber || style.wrap || style.hAlign === 'justify') continue;
+        const a = horizontalOf(style, cell);
+        if ((c < r.cols[0] && a === 'right') || (c > r.cols[1] && a === 'left')) continue;
+      }
+      const job = makeJob(v, cell, style, rect);
       if (isNumber || job.style.wrap || job.style.hAlign === 'justify') {
-        if (!inside) continue;
         paintText(ctx, v, { ...job, clip: rect, lines: layoutLines(v, job, rect, isNumber) });
         continue;
       }

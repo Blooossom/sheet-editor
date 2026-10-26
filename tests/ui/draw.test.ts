@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  drawCells,
+  type DrawView,
   PAD_X,
   PAD_Y,
   horizontalOf,
@@ -9,7 +11,9 @@ import {
   overflowExtent,
   textOrigin,
 } from '../../src/ui/canvas/draw';
-import type { ResolvedStyle } from '../../src/grid/resolve';
+import { StyleResolver, type ResolvedStyle } from '../../src/grid/resolve';
+import { SheetGeometry } from '../../src/grid/geometry';
+import type { WorkbookModel } from '../../src/core/types';
 import { makeWorkbook } from '../helpers/model';
 
 const rect = { x: 100, y: 40, w: 80, h: 30 };
@@ -119,18 +123,132 @@ describe('lineHeightOf', () => {
 });
 
 describe('isPlainSheet', () => {
-  it('csv와 서식·크기 정보가 없는 시트는 기본 모습이다', () => {
+  it('csv만 기본 모습이다', () => {
     const csv = makeWorkbook('csv', [{ name: 'a', grid: [['x']] }]);
-    expect(isPlainSheet(csv, csv.sheets[0])).toBe(true);
-    const bare = makeWorkbook('xlsx', [{ name: 'a', grid: [['x']] }]);
-    expect(isPlainSheet(bare, bare.sheets[0])).toBe(true);
+    expect(isPlainSheet(csv)).toBe(true);
   });
-  it('열 너비나 추가 서식이 있으면 Excel 모습이다', () => {
-    const wb = makeWorkbook('xlsx', [{ name: 'a', grid: [['x']] }]);
-    wb.sheets[0].layout.colRuns.push({ c1: 0, c2: 0, info: { width: 20 } });
-    expect(isPlainSheet(wb, wb.sheets[0])).toBe(false);
-    const styled = makeWorkbook('xlsx', [{ name: 'a', grid: [['x']] }]);
-    styled.styles.xfs.push({ numFmtId: 0, fontId: 0, fillId: 0, borderId: 0 });
-    expect(isPlainSheet(styled, styled.sheets[0])).toBe(false);
+  it('xlsx는 서식이 없어도 Excel 모습이다', () => {
+    const bare = makeWorkbook('xlsx', [{ name: 'a', grid: [['x']] }]);
+    expect(isPlainSheet(bare)).toBe(false);
+  });
+});
+
+/** 그리기 호출만 세는 가짜 캔버스(픽셀 없음) */
+function stubCtx() {
+  const texts: { text: string; x: number; y: number }[] = [];
+  const ctx = new Proxy({} as Record<string, unknown>, {
+    get: (_t, prop) => {
+      if (prop === 'fillText') return (text: string, x: number, y: number) => texts.push({ text, x, y });
+      return () => {};
+    },
+    set: () => true,
+  }) as unknown as CanvasRenderingContext2D;
+  return { ctx, texts };
+}
+
+function view(wb: WorkbookModel, geo: SheetGeometry, over: Partial<DrawView> = {}) {
+  let measured = 0;
+  const size = { w: 800, h: 600 };
+  const header = { w: 40, h: 20 };
+  const scroll = over.scroll ?? { x: 0, y: 0 };
+  const v: DrawView = {
+    geometry: geo,
+    resolver: new StyleResolver(wb),
+    wb,
+    sheet: 0,
+    visible: geo.visible(scroll.x, scroll.y, size.w - header.w, size.h - header.h),
+    scroll,
+    dpr: 1,
+    selection: null,
+    edited: () => false,
+    showGridLines: true,
+    rowView: null,
+    size,
+    header,
+    mdw: 7,
+    plain: false,
+    measure: () => (s: string) => {
+      measured++;
+      return s.length * 7;
+    },
+    ...over,
+  };
+  return { v, measured: () => measured };
+}
+
+describe('drawCells (가짜 캔버스)', () => {
+  it('5만 행 시트: 한 프레임의 글자·측정 호출은 보이는 칸 수에 비례한다', () => {
+    const grid = Array.from({ length: 50000 }, (_, r) => [`r${r}`, r, `긴 글자 ${r}`, null, 'x']);
+    const wb = makeWorkbook('xlsx', [{ name: 'a', grid }]);
+    const geo = new SheetGeometry({
+      rowCount: 50050, colCount: 26, rowView: null, rowHeight: () => 20, colWidth: () => 64, merges: [], freeze: { rows: 0, cols: 0 },
+    });
+    for (const y of [0, 500000, 999000]) {
+      const { ctx, texts } = stubCtx();
+      const { v, measured } = view(wb, geo, { scroll: { x: 0, y } });
+      const rows = v.visible.r2 - v.visible.r1 + 1;
+      const cols = v.visible.c2 - v.visible.c1 + 1;
+      expect(rows).toBeLessThanOrEqual(31);
+      drawCells(ctx, v);
+      // 칸 글자(행당 최대 5) + 행 머리글 + 열 머리글
+      expect(texts.length).toBeLessThanOrEqual(rows * 5 + rows + cols);
+      expect(texts.length).toBeGreaterThan(rows * 4);
+      expect(measured()).toBeLessThanOrEqual(rows * 5 * 2);
+      expect(texts.some((t) => t.text === `r${v.visible.r1}`)).toBe(true);
+    }
+  });
+
+  it('숨긴 열로 접힌 병합(A1:C1, B:C 숨김)도 앵커 값을 그린다', () => {
+    const wb = makeWorkbook('xlsx', [{ name: 'a', grid: [['제목', null, null]] }]);
+    wb.sheets[0].layout.merges.push({ r1: 0, c1: 0, r2: 0, c2: 2 });
+    const geo = new SheetGeometry({
+      rowCount: 5, colCount: 5, rowView: null, rowHeight: () => 20, colWidth: (c) => (c === 1 || c === 2 ? 0 : 64),
+      merges: wb.sheets[0].layout.merges, freeze: { rows: 0, cols: 0 },
+    });
+    const { ctx, texts } = stubCtx();
+    drawCells(ctx, view(wb, geo).v);
+    expect(texts.filter((t) => t.text === '제목')).toHaveLength(1);
+  });
+
+  it('숨긴 행으로 접힌 병합(A1:A2, 2행 숨김)도 앵커 값을 그린다', () => {
+    const wb = makeWorkbook('xlsx', [{ name: 'a', grid: [['제목'], [null]] }]);
+    wb.sheets[0].layout.merges.push({ r1: 0, c1: 0, r2: 1, c2: 0 });
+    const geo = new SheetGeometry({
+      rowCount: 5, colCount: 5, rowView: null, rowHeight: (r) => (r === 1 ? 0 : 20), colWidth: () => 64,
+      merges: wb.sheets[0].layout.merges, freeze: { rows: 0, cols: 0 },
+    });
+    const { ctx, texts } = stubCtx();
+    drawCells(ctx, view(wb, geo).v);
+    expect(texts.filter((t) => t.text === '제목')).toHaveLength(1);
+  });
+
+  it('필터로 끊긴 병합은 보이는 첫 행에 앵커 값을 한 번 그린다', () => {
+    // 병합 A2:A4(원래 행 1–3), 필터 결과 [0, 2, 3] → 원래 1행이 빠져 끊김
+    const wb = makeWorkbook('xlsx', [{ name: 'a', grid: [['머리'], ['병합'], [null], [null]] }]);
+    wb.sheets[0].layout.merges.push({ r1: 1, c1: 0, r2: 3, c2: 0 });
+    const rowView = [0, 2, 3];
+    const geo = new SheetGeometry({
+      rowCount: 3, colCount: 5, rowView, rowHeight: () => 20, colWidth: () => 64,
+      merges: wb.sheets[0].layout.merges, freeze: { rows: 0, cols: 0 },
+    });
+    const { ctx, texts } = stubCtx();
+    drawCells(ctx, view(wb, geo, { rowView }).v);
+    const hits = texts.filter((t) => t.text === '병합');
+    expect(hits).toHaveLength(1);
+    // 화면 1행(원래 2행) 안. 가짜 ctx는 translate를 무시하므로 시트 좌표 y 20..40
+    expect(hits[0].y).toBeGreaterThanOrEqual(20);
+    expect(hits[0].y).toBeLessThanOrEqual(40);
+  });
+
+  it('보이는 병합은 앵커 값을 한 번만 그린다', () => {
+    const wb = makeWorkbook('xlsx', [{ name: 'a', grid: [['제목', null, null]] }]);
+    wb.sheets[0].layout.merges.push({ r1: 0, c1: 0, r2: 0, c2: 2 });
+    const geo = new SheetGeometry({
+      rowCount: 5, colCount: 5, rowView: null, rowHeight: () => 20, colWidth: () => 64,
+      merges: wb.sheets[0].layout.merges, freeze: { rows: 0, cols: 0 },
+    });
+    const { ctx, texts } = stubCtx();
+    drawCells(ctx, view(wb, geo).v);
+    expect(texts.filter((t) => t.text === '제목')).toHaveLength(1);
   });
 });

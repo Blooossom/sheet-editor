@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DocumentStore } from '../../document/store';
 import { SheetGeometry } from '../../grid/geometry';
 import { colWidthPx, defaultColWidthPx, maxDigitWidth, rowHeightPx } from '../../grid/metrics';
@@ -33,7 +33,7 @@ export function CanvasGrid({ store, sheet, rowView, sessionSizes }: CanvasGridPr
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
-  const plain = isPlainSheet(wb, model);
+  const plain = isPlainSheet(wb);
   const mdw = useMemo(() => (plain ? 7 : maxDigitWidth(wb.styles.fonts[0])), [plain, wb.styles]);
   const resolver = useMemo(() => new StyleResolver(wb), [wb]);
 
@@ -119,16 +119,32 @@ export function CanvasGrid({ store, sheet, rowView, sessionSizes }: CanvasGridPr
   };
 
   const frame = useRef(0);
-  const schedule = () => {
+  const schedule = useCallback(() => {
     if (frame.current) return;
     frame.current = requestAnimationFrame(() => {
       frame.current = 0;
       drawRef.current();
     });
-  };
+  }, []);
 
   useLayoutEffect(schedule);
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
+
+  // 창이 다른 배율의 화면으로 옮겨지면 다시 그린다(조건은 현재 배율마다 새로 건다)
+  useEffect(() => {
+    let mq: MediaQueryList | null = null;
+    const onChange = () => {
+      listen();
+      schedule();
+    };
+    const listen = () => {
+      mq?.removeEventListener('change', onChange);
+      mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      mq.addEventListener('change', onChange);
+    };
+    listen();
+    return () => mq?.removeEventListener('change', onChange);
+  }, [schedule]);
 
   useEffect(() => {
     const el = scrollerRef.current;
