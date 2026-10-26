@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { copyText, parseTsv } from '../../src/ui/canvas/clipboard';
+import { clearEdits, copyText, parseTsv } from '../../src/ui/canvas/clipboard';
 import { pasteEdits } from '../../src/ui/paste';
 import { makeWorkbook } from '../helpers/model';
 
@@ -22,6 +22,25 @@ describe('copyText', () => {
   it('copyText 결과를 parseTsv로 되읽으면 같은 값이다', () => {
     const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [['x\ny', '"q'], ['', 'z']] }]);
     expect(parseTsv(copyText(wb, 0, { r1: 0, c1: 0, r2: 1, c2: 1 }, null))).toEqual([['x\ny', '"q'], ['', 'z']]);
+  });
+});
+
+describe('clearEdits', () => {
+  it('범위 안의 있는 칸만 빈 값으로 바꾼다', () => {
+    const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [['a', 'b', 'c'], ['d', null, 'f']] }]);
+    expect(clearEdits(wb, 0, { r1: 0, c1: 1, r2: 5, c2: 9 }, null)).toEqual([
+      { sheet: 0, row: 0, col: 1, input: '' },
+      { sheet: 0, row: 0, col: 2, input: '' },
+      { sheet: 0, row: 1, col: 2, input: '' },
+    ]);
+  });
+
+  it('필터 중에는 보이는 행만 지운다', () => {
+    const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [['r0'], ['r1'], ['r2'], ['r3']] }]);
+    expect(clearEdits(wb, 0, { r1: 0, c1: 0, r2: 5, c2: 0 }, [1, 3])).toEqual([
+      { sheet: 0, row: 1, col: 0, input: '' },
+      { sheet: 0, row: 3, col: 0, input: '' },
+    ]);
   });
 });
 

@@ -12,7 +12,7 @@ export default defineConfig(() => ({
   //
   // 1. prevent Vite from obscuring rust errors
   clearScreen: false,
-  // 로컬 파일로 읽는 데스크톱 앱이라 한 덩어리 번들이 문제되지 않는다 (표 + 수식 파서 ≈ 900KB)
+  // 로컬 파일로 읽는 데스크톱 앱이라 한 덩어리 번들이 문제되지 않는다 (수식 파서 포함 ≈ 700KB)
   build: { chunkSizeWarningLimit: 1500 },
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {

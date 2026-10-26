@@ -59,13 +59,15 @@ body,
 
 .formula-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   border-bottom: 1px solid #e5e5ea;
 }
 
 .cell-address {
   width: 72px;
   padding: 6px 12px;
+  line-height: 18px;
+  align-self: stretch;
   color: #6e6e73;
   border-right: 1px solid #e5e5ea;
   font-variant-numeric: tabular-nums;
@@ -73,22 +75,40 @@ body,
 
 .formula-input {
   flex: 1;
+  box-sizing: content-box;
+  margin: 0;
   border: none;
   outline: none;
   padding: 6px 12px;
   font: inherit;
+  line-height: 18px;
   background: transparent;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+}
+
+/* 펼치면 3줄까지 보이고 넘치면 스크롤한다 */
+.formula-input.expanded {
+  overflow: auto;
+}
+
+.formula-expand {
+  flex: none;
+  width: 28px;
+  height: 30px;
+  padding: 0;
+  font: inherit;
+  color: #6e6e73;
+  border: none;
+  background: transparent;
+  cursor: pointer;
 }
 
 .main {
   flex: 1;
   display: flex;
   min-height: 0;
-}
-
-.grid {
-  flex: 1;
-  min-width: 0;
 }
 
 .sheet-tabs {

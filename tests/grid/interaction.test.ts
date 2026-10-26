@@ -135,4 +135,13 @@ describe('gridKeyAction', () => {
     expect(k('ArrowDown', { keyCode: 229 })).toBeNull()
     expect(k('ㅎ', { keyCode: 229 })).toBeNull()
   })
+
+  it('⌘A는 전체 선택, Delete·Backspace는 선택 칸 지우기', () => {
+    expect(k('a', { metaKey: true })).toEqual({ kind: 'selectAll' })
+    expect(k('A', { metaKey: true, shiftKey: true })).toBeNull()
+    expect(k('Delete')).toEqual({ kind: 'clear' })
+    expect(k('Backspace')).toEqual({ kind: 'clear' })
+    expect(k('Backspace', { metaKey: true })).toBeNull()
+    expect(k('Backspace', { keyCode: 229 })).toBeNull()
+  })
 })

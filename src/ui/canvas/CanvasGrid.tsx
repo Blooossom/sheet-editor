@@ -13,7 +13,7 @@ import { pasteEdits, type CellEdit } from '../paste';
 import type { ContextMenuRequest, Selection } from '../selectionTypes';
 import { useStore } from '../useStore';
 import { CellEditor, editorBox, editorKeyAction, idleInputAction, type EditorKeyAction } from './CellEditor';
-import { copyText, parseTsv } from './clipboard';
+import { clearEdits, copyText, parseTsv } from './clipboard';
 import { drawCells, horizontalOf, isPlainSheet, lineHeightOf, PAD_X, PAD_Y, PLAIN_FONT, type DrawView } from './draw';
 import './canvas.css';
 
@@ -271,8 +271,12 @@ export const CanvasGrid = forwardRef<CanvasGridHandle, CanvasGridProps>(function
     return () => ro.disconnect();
   }, []);
 
-  // 처음부터 방향키가 먹도록 표의 입력창에 포커스를 둔다
-  useEffect(() => inputRef.current?.focus({ preventScroll: true }), []);
+  // 처음부터 방향키가 먹도록 표의 입력창에 포커스를 둔다. 입력줄·검색창에서 입력 중이면 빼앗지 않는다.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) return;
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
 
   // ── 선택 ────────────────────────────────────────────────
 
@@ -593,6 +597,17 @@ export const CanvasGrid = forwardRef<CanvasGridHandle, CanvasGridProps>(function
     // 조합 키(229)는 null — compositionstart가 편집을 연다
     const action = gridKeyAction({ key, shiftKey, metaKey, ctrlKey, keyCode, isComposing });
     if (!action) return;
+    if (action.kind === 'selectAll') {
+      e.preventDefault();
+      const { lastRow: lr, lastCol: lc } = live.current;
+      select({ anchor: { row: 0, col: 0 }, focus: { row: lr, col: lc }, mode: 'cells' });
+      return;
+    }
+    if (action.kind === 'clear') {
+      e.preventDefault();
+      clearSelection();
+      return;
+    }
     if (action.kind === 'edit') {
       if (action.initial === undefined) {
         e.preventDefault();
@@ -654,19 +669,17 @@ export const CanvasGrid = forwardRef<CanvasGridHandle, CanvasGridProps>(function
     e.clipboardData.setData('text/plain', copyText(wb, sheet, clipRange(), rowView));
   };
 
+  /** 선택 칸의 값을 지운다(잘라내기·Delete). 한 번이 되돌리기 한 단계, 필터 중에는 보이는 행만. */
+  const clearSelection = () => {
+    if (readonly) return;
+    const edits = clearEdits(wb, sheet, clipRange(), rowView);
+    if (edits.length > 0) onCommit(edits);
+  };
+
   const onCut = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     if (editingRef.current) return;
     onCopy(e);
-    if (readonly) return;
-    const r = clipRange();
-    const edits: CellEdit[] = [];
-    for (let d = r.r1; d <= r.r2; d++) {
-      const row = origRow(d);
-      const cells = row === undefined ? undefined : model.cells.get(row);
-      if (row === undefined || !cells) continue;
-      for (let c = r.c1; c <= r.c2; c++) if (cells.has(c)) edits.push({ sheet, row, col: c, input: '' });
-    }
-    if (edits.length > 0) onCommit(edits);
+    clearSelection();
   };
 
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {

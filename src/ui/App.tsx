@@ -8,10 +8,10 @@ import type { Op } from '../core/types';
 import { buildRowView, distinctValues } from '../core/view';
 import { DocumentStore } from '../document/store';
 import { tauriIo } from '../document/io';
-import { CanvasGrid } from './canvas/CanvasGrid';
+import { CanvasGrid, type CanvasGridHandle, type ResizeEvent } from './canvas/CanvasGrid';
 import { ContextMenu, type MenuItem } from './ContextMenu';
-import { FormulaBar } from './FormulaBar';
-import { Grid, showError } from './Grid';
+import { showError } from './errors';
+import { FormulaBar, type FormulaBarHandle } from './FormulaBar';
 import type { CellEdit } from './paste';
 import type { ContextMenuRequest, Selection } from './selectionTypes';
 import { SheetTabs } from './SheetTabs';
@@ -23,10 +23,8 @@ import './app.css';
 
 type Unlisten = () => void;
 
-// 개발 확인용: 창 URL에 canvas=1이 있으면 캔버스 표를 쓴다(Task 12에서 제거)
-const CANVAS_DEV = new URLSearchParams(window.location.search).get('canvas') === '1';
-// 캔버스 크기 조절은 아직 연결 전이다(Task 15·16)
-const logCanvasEvent = (e: unknown) => console.debug('canvas', e);
+type SessionSizes = { cols: Map<number, number>; rows: Map<number, number> };
+const NO_SIZES: SessionSizes = { cols: new Map(), rows: new Map() };
 
 function fileName(path: string | null): string {
   return path ? (path.split('/').pop() ?? path) : '제목 없음';
@@ -44,19 +42,11 @@ function openPaths(paths: string[]): void {
   }
 }
 
-/** 입력줄과 표의 편집기에 남은 입력을 확정한다. 표 편집기는 바깥 클릭으로만 확정되므로 클릭을 흉내 낸다. */
-async function flushEdits(): Promise<void> {
-  const active = document.activeElement;
-  if (active instanceof HTMLElement) active.blur();
-  document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-/** 저장에 성공하면 true. 새 문서는 위치를 묻고, 취소하면 false. */
-async function saveDocument(store: DocumentStore): Promise<boolean> {
+/** 저장에 성공하면 true. 새 문서는 위치를 묻고, 취소하면 false. flushEdits는 입력줄·표 편집기에 남은 입력을 확정한다. */
+async function saveDocument(store: DocumentStore, flushEdits: () => void): Promise<boolean> {
   if (store.saving) return false;
   try {
-    await flushEdits();
+    flushEdits();
     if (store.source.format === 'new') {
       const path = await save({
         filters: [
@@ -125,6 +115,7 @@ const COL_ACTIONS: [string, StructuralAction][] = [
 
 async function handleMenu(
   store: DocumentStore,
+  flushEdits: () => void,
   id: string,
   structural: (action: StructuralAction) => void,
   after: (ops: Op[] | null, undo: boolean) => void,
@@ -139,7 +130,7 @@ async function handleMenu(
       break;
     }
     case 'save':
-      await saveDocument(store);
+      await saveDocument(store, flushEdits);
       break;
     case 'close':
       await getCurrentWindow().close();
@@ -189,6 +180,13 @@ export function App() {
   const viewRef = useRef(view);
   viewRef.current = view;
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [sessionSizes, setSessionSizes] = useState<SessionSizes>(NO_SIZES); // csv 크기 조절(저장하지 않음)
+  const gridRef = useRef<CanvasGridHandle>(null);
+  const formulaRef = useRef<FormulaBarHandle>(null);
+  const flushEdits = useCallback(() => {
+    formulaRef.current?.commit();
+    gridRef.current?.commitEditor();
+  }, []);
 
   useEffect(() => {
     if (started.current) return; // StrictMode에서 두 번 실행되지 않도록
@@ -223,7 +221,7 @@ export function App() {
   }, [store.path, name]);
 
   useTauriListener(() => getCurrentWebviewWindow().listen<string>('menu', (e) => {
-      handleMenu(store, e.payload, (a) => runStructural.current(a), (ops, undo) => afterHistory.current(ops, undo)).catch(showError);
+      handleMenu(store, flushEdits, e.payload, (a) => runStructural.current(a), (ops, undo) => afterHistory.current(ops, undo)).catch(showError);
     }));
 
   useTauriListener(() =>
@@ -254,7 +252,7 @@ export function App() {
       event.preventDefault();
       closing.current = true;
       try {
-        await flushEdits(); // 편집 중인 셀도 수정 사항으로 친다
+        flushEdits(); // 편집 중인 셀도 수정 사항으로 친다
         if (!store.dirty) {
           await getCurrentWindow().destroy();
           return;
@@ -263,7 +261,7 @@ export function App() {
           buttons: { yes: '저장', no: '저장 안 함', cancel: '취소' },
         });
         // 사용자 지정 버튼이면 누른 버튼의 문구가 돌아온다
-        const close = answer === '저장' ? await saveDocument(store) : answer === '저장 안 함';
+        const close = answer === '저장' ? await saveDocument(store, flushEdits) : answer === '저장 안 함';
         if (close) await getCurrentWindow().destroy();
       } finally {
         closing.current = false;
@@ -296,8 +294,8 @@ export function App() {
     setSelection(sel);
   }, []);
 
-  // 캔버스 표의 편집 확정·붙여넣기(Glide 표의 편집 처리와 같은 규칙: 저장 중이면 무시, 한 번이 되돌리기 한 단계)
-  const onCanvasCommit = useCallback(
+  // 표의 편집 확정·붙여넣기·잘라내기·지우기(저장 중이면 무시, 한 번이 되돌리기 한 단계)
+  const onCommit = useCallback(
     (edits: CellEdit[]) => {
       if (store.saving) return;
       try {
@@ -308,7 +306,21 @@ export function App() {
     },
     [store],
   );
-  const onCanvasWarning = useCallback((text: string) => void message(text, { kind: 'warning' }), []);
+  const onWarning = useCallback((text: string) => void message(text, { kind: 'warning' }), []);
+
+  const isCsv = wb.kind === 'csv';
+  const onResize = useCallback(
+    (e: ResizeEvent) => {
+      // xlsx 크기 조절은 Task 15·16에서 Op로 연결한다. 그 전까지는 무시한다.
+      if (!isCsv) return;
+      setSessionSizes((prev) =>
+        e.kind === 'col'
+          ? { ...prev, cols: new Map([...prev.cols, ...e.cols.map((c): [number, number] => [c, e.px])]) }
+          : { ...prev, rows: new Map([...prev.rows, ...e.rows.map((r): [number, number] => [r, e.px])]) },
+      );
+    },
+    [isCsv],
+  );
 
   const onQuery = useCallback(
     (query: string) => {
@@ -381,32 +393,24 @@ export function App() {
         rows={wb.sheets[current].rowCount}
         dirty={dirty}
         saving={store.saving}
-        onSave={() => void saveDocument(store)}
+        onSave={() => void saveDocument(store, flushEdits)}
       />
-      <FormulaBar store={store} selection={selection} />
+      <FormulaBar ref={formulaRef} store={store} selection={selection} />
       <div className="main">
-        {ready && CANVAS_DEV && (
+        {ready && (
           <CanvasGrid
+            ref={gridRef}
             key={current}
             store={store}
             sheet={current}
             rowView={view.rows}
             readonly={store.saving}
+            sessionSizes={isCsv ? sessionSizes : undefined}
             onSelect={onSelect}
             onContextMenu={onContextMenu}
-            onResize={logCanvasEvent}
-            onCommit={onCanvasCommit}
-            onWarning={onCanvasWarning}
-          />
-        )}
-        {ready && !CANVAS_DEV && (
-          <Grid
-            key={current}
-            store={store}
-            sheet={current}
-            rowView={view.rows}
-            onSelect={onSelect}
-            onContextMenu={onContextMenu}
+            onResize={onResize}
+            onCommit={onCommit}
+            onWarning={onWarning}
           />
         )}
         {ready && (

@@ -59,7 +59,12 @@ export function resizeTargets(sel: GridSel, axis: 'col' | 'row', index: number, 
   return list.map((d) => geo.origRowOf(d)).filter((r): r is number => r !== undefined)
 }
 
-export type KeyAction = { kind: 'move'; key: MoveKey } | { kind: 'edit'; initial?: string } | null
+export type KeyAction =
+  | { kind: 'move'; key: MoveKey }
+  | { kind: 'edit'; initial?: string }
+  | { kind: 'selectAll' }
+  | { kind: 'clear' } // 선택 칸 지우기(1차 Glide의 Delete 기본 동작)
+  | null
 
 const MOVE_KEYS: Record<string, MoveKey> = {
   ArrowUp: 'ArrowUp', ArrowDown: 'ArrowDown', ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight',
@@ -74,6 +79,8 @@ export function gridKeyAction(e: { key: string; shiftKey: boolean; metaKey: bool
   const key = MOVE_KEYS[e.key]
   if (key) return { kind: 'move', key }
   if (e.key === 'F2') return { kind: 'edit' }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && !e.metaKey && !e.ctrlKey) return { kind: 'clear' }
+  if (e.metaKey && !e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === 'a') return { kind: 'selectAll' }
   if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) return { kind: 'edit', initial: e.key }
   return null
 }

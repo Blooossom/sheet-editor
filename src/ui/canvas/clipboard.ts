@@ -1,6 +1,7 @@
 import { DEFAULT_DIALECT, parseCsv } from '../../csv/csv';
 import { displayText } from '../../core/display';
 import type { CellRange, WorkbookModel } from '../../core/types';
+import type { CellEdit } from '../paste';
 
 const TSV = { ...DEFAULT_DIALECT, delimiter: '\t' as const };
 
@@ -21,6 +22,19 @@ export function copyText(wb: WorkbookModel, sheet: number, range: CellRange, row
     lines.push(values.join('\t'));
   }
   return lines.join('\n');
+}
+
+/** 선택 범위(행은 화면 행)에서 값이 있는 칸을 비우는 편집 목록(잘라내기·Delete). 보이는 행만, 원래 행 번호로. */
+export function clearEdits(wb: WorkbookModel, sheet: number, range: CellRange, rowView: number[] | null): CellEdit[] {
+  const edits: CellEdit[] = [];
+  const all = wb.sheets[sheet].cells;
+  for (let d = range.r1; d <= range.r2; d++) {
+    const row = rowView ? rowView[d] : d;
+    const cells = row === undefined ? undefined : all.get(row);
+    if (row === undefined || !cells) continue;
+    for (let c = range.c1; c <= range.c2; c++) if (cells.has(c)) edits.push({ sheet, row, col: c, input: '' });
+  }
+  return edits;
 }
 
 /** 클립보드 글자를 칸 값 표로. 따옴표로 감싼 칸 안의 줄바꿈은 칸 안에 둔다. */
