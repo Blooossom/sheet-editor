@@ -18,7 +18,8 @@
     "fast-formula-parser": "^1.0.19",
     "fflate": "^0.8.3",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "ssf": "0.11.2"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

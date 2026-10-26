@@ -23,3 +23,21 @@ it('1904 기준·초 반올림·날짜 아닌 값', () => {
   expect(editText({ value: false }, wb)).toBe('FALSE');
   expect(editText(undefined, wb)).toBe('');
 });
+it('형식 코드로 표시, 편집 문자열은 1차 규칙 유지', () => {
+  const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [[1]] }]);
+  wb.styles.numFmts.set(176, 'm"월" d"일"');
+  wb.styles.xfs = [
+    { numFmtId: 0, fontId: 0, fillId: 0, borderId: 0 },
+    { numFmtId: 176, fontId: 0, fillId: 0, borderId: 0 },
+    { numFmtId: 10, fontId: 0, fillId: 0, borderId: 0 },
+  ];
+  wb.dateStyleIds.add(1);
+  expect(displayText({ value: 46293, styleId: 1 }, wb)).toBe('9월 28일');
+  expect(editText({ value: 46293, styleId: 1 }, wb)).toBe('2026-09-28');
+  expect(displayText({ value: 0.256, styleId: 2 }, wb)).toBe('25.60%');
+  expect(editText({ value: 0.256, styleId: 2 }, wb)).toBe('0.256');
+  expect(displayText({ value: 'abc', styleId: 2 }, wb)).toBe('abc');
+  const csv = makeWorkbook('csv', [{ name: 'S', grid: [[1]] }]);
+  csv.styles.xfs = wb.styles.xfs;
+  expect(displayText({ value: 5, styleId: 2 }, csv)).toBe('5');
+});

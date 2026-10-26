@@ -1,4 +1,5 @@
 import type { Cell, WorkbookModel } from './types';
+import { formatCode, formatNumber } from '../format/numfmt';
 
 function pad(n: number, len = 2): string {
   return String(n).padStart(len, '0');
@@ -20,7 +21,8 @@ function numberText(v: number): string {
   return String(Number(v.toPrecision(15)));
 }
 
-export function displayText(cell: Cell | undefined, wb: WorkbookModel): string {
+// 1차 규칙: 날짜는 ISO, 그 밖의 숫자는 있는 그대로(편집용).
+function plainText(cell: Cell | undefined, wb: WorkbookModel): string {
   if (!cell) return '';
   const v = cell.value;
   if (v === null) return '';
@@ -33,8 +35,17 @@ export function displayText(cell: Cell | undefined, wb: WorkbookModel): string {
   return numberText(v);
 }
 
+export function displayText(cell: Cell | undefined, wb: WorkbookModel): string {
+  if (cell && wb.kind === 'xlsx' && typeof cell.value === 'number') {
+    const code = formatCode(wb.styles, cell.styleId);
+    if (code !== 'General') return formatNumber(cell.value, code, wb.date1904).text;
+  }
+  return plainText(cell, wb);
+}
+
+// 편집 문자열은 1차 규칙을 유지한다(형식 코드는 표시에만 쓴다).
 export function editText(cell: Cell | undefined, wb: WorkbookModel): string {
   if (!cell) return '';
   if (cell.formula !== undefined) return '=' + cell.formula;
-  return displayText(cell, wb);
+  return plainText(cell, wb);
 }
