@@ -12,15 +12,11 @@ export interface GeometryInput {
 
 export interface Rect { x: number; y: number; w: number; h: number }
 
-/** offsets[i] = i번째 칸의 시작, offsets[n] = 전체. 시작이 y 이하인 마지막이 아니라, 끝이 y를 넘는 첫 칸을 찾는다(높이 0 칸 제외). */
-function indexAt(offsets: Float64Array, n: number, v: number): number {
-  if (n === 0) return 0
-  if (v >= offsets[n]) {
-    // 끝쪽의 숨김 칸을 건너뛰어 마지막 보이는 칸을 돌려준다
-    let i = n - 1
-    while (i > 0 && offsets[i] === offsets[i + 1]) i--
-    return i
-  }
+/** 끝이 v를 넘는 첫 칸(높이 0 칸은 건너뜀). v<0은 첫 보이는 칸, v>=전체는 lastVisible. 보이는 칸이 없으면 -1. */
+function indexAt(offsets: Float64Array, n: number, lastVisible: number, v: number): number {
+  if (lastVisible < 0) return -1
+  if (v >= offsets[n]) return lastVisible
+  if (v < 0) v = 0
   let lo = 0
   let hi = n - 1
   while (lo < hi) {
@@ -29,6 +25,11 @@ function indexAt(offsets: Float64Array, n: number, v: number): number {
     else lo = mid + 1
   }
   return lo
+}
+
+function lastVisibleOf(offsets: Float64Array, n: number): number {
+  for (let i = n - 1; i >= 0; i--) if (offsets[i + 1] > offsets[i]) return i
+  return -1
 }
 
 export class SheetGeometry {
@@ -42,6 +43,8 @@ export class SheetGeometry {
   private readonly colOff: Float64Array
   private readonly mergesByRow = new Map<number, CellRange[]>()
   private displayOf: Map<number, number> | null = null
+  private readonly lastRow: number
+  private readonly lastCol: number
 
   constructor(input: GeometryInput) {
     this.rowCount = input.rowCount
@@ -57,25 +60,43 @@ export class SheetGeometry {
     for (let c = 0; c < input.colCount; c++) this.colOff[c + 1] = this.colOff[c] + input.colWidth(c)
     this.totalHeight = this.rowOff[input.rowCount]
     this.totalWidth = this.colOff[input.colCount]
+    this.lastRow = lastVisibleOf(this.rowOff, input.rowCount)
+    this.lastCol = lastVisibleOf(this.colOff, input.colCount)
+    // 화면에 나올 수 있는 행에만 등록한다(전체 열 병합이 100만 항목을 만들지 않게)
     for (const m of input.merges) {
-      for (let r = m.r1; r <= m.r2; r++) {
+      const add = (r: number) => {
         const list = this.mergesByRow.get(r)
         if (list) list.push(m)
         else this.mergesByRow.set(r, [m])
+      }
+      if (!input.rowView) {
+        for (let r = Math.max(0, m.r1); r <= Math.min(m.r2, input.rowCount - 1); r++) add(r)
+      } else if (m.r2 - m.r1 + 1 <= input.rowView.length) {
+        for (let r = m.r1; r <= m.r2; r++) if (this.displayRowOf(r) !== null) add(r)
+      } else {
+        for (const r of input.rowView) if (r >= m.r1 && r <= m.r2) add(r)
       }
     }
   }
 
   colX(col: number): number { return this.colOff[col] }
   rowY(displayRow: number): number { return this.rowOff[displayRow] }
-  colAt(x: number): number { return indexAt(this.colOff, this.colCount, x) }
-  rowAt(y: number): number { return indexAt(this.rowOff, this.rowCount, y) }
+  colAt(x: number): number { return indexAt(this.colOff, this.colCount, this.lastCol, x) }
+  rowAt(y: number): number { return indexAt(this.rowOff, this.rowCount, this.lastRow, y) }
 
   /** 뷰포트와 겹치는 화면 행·열 범위(포함). 틀 고정 영역은 호출한 쪽에서 따로 그린다. */
   visible(scrollX: number, scrollY: number, w: number, h: number): { r1: number; r2: number; c1: number; c2: number } {
     const lastY = Math.max(scrollY, scrollY + h - 1e-6)
     const lastX = Math.max(scrollX, scrollX + w - 1e-6)
-    return { r1: this.rowAt(scrollY), r2: this.rowAt(lastY), c1: this.colAt(scrollX), c2: this.colAt(lastX) }
+    // 보이는 행(열)이 없으면 r1 > r2(c1 > c2)인 빈 범위를 돌려준다
+    const r1 = this.rowAt(scrollY)
+    const c1 = this.colAt(scrollX)
+    return {
+      r1: r1 < 0 ? 0 : r1,
+      r2: r1 < 0 ? -1 : this.rowAt(lastY),
+      c1: c1 < 0 ? 0 : c1,
+      c2: c1 < 0 ? -1 : this.colAt(lastX),
+    }
   }
 
   mergeAt(origRow: number, col: number): CellRange | null {
@@ -94,7 +115,9 @@ export class SheetGeometry {
     return this.displayOf.get(origRow) ?? null
   }
 
+  /** 범위 밖 칸은 크기 0인 사각형을 돌려준다. */
   cellRect(displayRow: number, col: number): Rect {
+    if (displayRow < 0 || displayRow >= this.rowCount || col < 0 || col >= this.colCount) return { x: 0, y: 0, w: 0, h: 0 }
     const single = (): Rect => ({
       x: this.colOff[col],
       y: this.rowOff[displayRow],
@@ -106,8 +129,9 @@ export class SheetGeometry {
     if (!m) return single()
     const d1 = this.displayRowOf(m.r1)
     if (d1 === null) return single()
-    const d2 = d1 + (m.r2 - m.r1)
-    if (d2 >= this.rowCount) return single()
+    let d2 = d1 + (m.r2 - m.r1)
+    if (!this.rowView) d2 = Math.min(d2, this.rowCount - 1) // 화면에 둔 행 수까지만 자른다
+    else if (d2 >= this.rowCount) return single()
     if (this.rowView) {
       // 병합의 모든 행이 화면에서 연속으로 있어야 합친다
       for (let r = m.r1; r <= m.r2; r++) if (this.rowView[d1 + (r - m.r1)] !== r) return single()

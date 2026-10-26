@@ -11,7 +11,7 @@ function wrapParagraph(text: string, maxWidth: number, measure: (s: string) => n
   }
   for (const tok of text.match(TOKEN) ?? []) {
     if (/^\s/.test(tok)) {
-      if (cur !== '') cur += tok // 줄 맨 앞 공백은 버린다
+      if (cur !== '' || out.length === 0) cur += tok // 줄 바꿈으로 생긴 줄 맨 앞 공백만 버린다(문단 첫 줄은 유지)
       continue
     }
     if (measure(cur + tok) <= maxWidth) {

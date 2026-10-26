@@ -128,3 +128,56 @@ describe('performance', () => {
     expect((performance.now() - t) / 100000).toBeLessThan(0.01)
   })
 })
+
+describe('hidden edges and clamps', () => {
+  it('첫 행이 숨겨져 있으면 v<0과 0은 첫 보이는 행', () => {
+    const g = new SheetGeometry(input({ rowHeight: (r) => (r === 0 ? 0 : 20) }))
+    expect(g.rowAt(-5)).toBe(1)
+    expect(g.rowAt(0)).toBe(1)
+  })
+
+  it('뒤쪽 숨김 행은 돌려주지 않는다', () => {
+    const g = new SheetGeometry(input({ rowHeight: (r) => (r >= 3 ? 0 : 20) }))
+    expect(g.rowAt(60)).toBe(2)
+    expect(g.rowAt(9999)).toBe(2)
+    expect(g.visible(0, 0, 100, 1000).r2).toBe(2)
+  })
+
+  it('모든 행이 숨겨지면 -1과 빈 범위', () => {
+    const g = new SheetGeometry(input({ rowHeight: () => 0, colWidth: () => 0 }))
+    expect(g.rowAt(0)).toBe(-1)
+    expect(g.colAt(0)).toBe(-1)
+    const v = g.visible(0, 0, 100, 100)
+    expect(v.r1).toBeGreaterThan(v.r2)
+    expect(v.c1).toBeGreaterThan(v.c2)
+    expect(new SheetGeometry(input({ rowCount: 0, colCount: 0 })).rowAt(0)).toBe(-1)
+  })
+
+  it('cellRect 범위 밖은 크기 0', () => {
+    const g = new SheetGeometry(input())
+    expect(g.cellRect(5, 0)).toEqual({ x: 0, y: 0, w: 0, h: 0 })
+    expect(g.cellRect(0, 4)).toEqual({ x: 0, y: 0, w: 0, h: 0 })
+  })
+
+  it('큰 병합도 빠르게 만들고 화면 행에서 올바르다', () => {
+    for (const r2 of [99999, 1048575]) {
+      const run = () => {
+        const t = performance.now()
+        const g = new SheetGeometry(input({ rowCount: 50000, colCount: 3, merges: [{ r1: 0, c1: 0, r2, c2: 0 }] }))
+        return [performance.now() - t, g] as const
+      }
+      const [t1, g] = run()
+      const best = Math.min(t1, run()[0], run()[0])
+      expect(best).toBeLessThan(50)
+      expect(g.mergeAt(49999, 0)?.r2).toBe(r2)
+      expect(g.mergeAt(0, 1)).toBeNull()
+      expect(g.cellRect(10, 0).h).toBe(50000 * 20) // 화면 행 수까지 잘린다
+    }
+  })
+
+  it('rowView에서는 화면에 있는 행만 병합 색인에 든다', () => {
+    const g = new SheetGeometry(input({ rowCount: 3, rowView: [5, 7, 9], merges: [{ r1: 0, c1: 0, r2: 1048575, c2: 0 }] }))
+    expect(g.mergeAt(7, 0)).not.toBeNull()
+    expect(g.mergeAt(6, 0)).toBeNull()
+  })
+})

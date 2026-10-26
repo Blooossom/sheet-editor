@@ -37,6 +37,13 @@ describe('wrapLines', () => {
   })
 })
 
+describe('leading whitespace', () => {
+  it('문단 첫 줄의 앞 공백은 유지한다', () => {
+    expect(wrapLines('  abc', 100, fixed)).toEqual(['  abc'])
+    expect(wrapLines('x\n  abc', 100, fixed)).toEqual(['x', '  abc'])
+  })
+})
+
 describe('makeMeasure', () => {
   it('글꼴을 지정하고 결과를 캐시한다', () => {
     let calls = 0
