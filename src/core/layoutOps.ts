@@ -7,8 +7,8 @@ export function shiftFreezeCount(n: number, at: number, count: number): number {
   return n - Math.max(0, Math.min(n, at - count) - at);
 }
 
-// structure.ts의 shiftIndex와 같은 규칙. 삭제되거나 시트 밖으로 밀리면 null.
-function shiftIndex(i: number, at: number, count: number, limit: number): number | null {
+/** 0부터 시작하는 행·열 번호 하나를 옮긴다. 삭제되거나 시트 밖으로 밀리면 null. 저장기(structure.ts)와 공용. */
+export function shiftIndex(i: number, at: number, count: number, limit: number): number | null {
   if (count >= 0) {
     if (i < at) return i;
     return i + count < limit ? i + count : null;

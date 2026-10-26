@@ -117,6 +117,7 @@ function sameLayout(src: Uint8Array, ops: Op[]) {
   expect(model.colRuns).toEqual(saved.colRuns);
   expect(model.rows).toEqual(saved.rows);
   expect(model.freeze).toEqual(saved.freeze);
+  return model;
 }
 
 describe('모델과 저장기의 레이아웃 동일성', () => {
@@ -133,7 +134,12 @@ describe('모델과 저장기의 레이아웃 동일성', () => {
   });
 
   it('짧은 연산열(1~8개) × 시드 200개 — 구조가 남아 있는 상태를 비교한다', () => {
-    for (let seed = 100; seed < 300; seed++) sameLayout(src, randomOps(seed, 1 + (seed % 8)));
+    let nonTrivial = 0;
+    for (let seed = 100; seed < 300; seed++) {
+      const L = sameLayout(src, randomOps(seed, 1 + (seed % 8)));
+      if (L.merges.length > 0 && (L.freeze.rows > 0 || L.freeze.cols > 0)) nonTrivial++;
+    }
+    expect(nonTrivial).toBeGreaterThan(0);
   });
 });
 
@@ -163,6 +169,22 @@ describe('틀 고정 저장', () => {
     expect(xml).not.toContain('pane="topRight"');
     expect(xml).not.toContain('pane="bottomRight"');
     expect(readLayout(xml).freeze).toEqual({ rows: 3, cols: 0 });
+  });
+
+  it('영역 밖 연산은 sheetView를 바꾸지 않는다(topLeft 선택·activePane 없음)', () => {
+    const view = `<sheetViews><sheetView workbookViewId="0"><pane ySplit="3" topLeftCell="A4" state="frozen"/><selection pane="topLeft" activeCell="A1" sqref="A1"/><selection pane="bottomLeft" activeCell="A4" sqref="A4"/></sheetView></sheetViews>`;
+    const x = buildXlsx({ sheets: [{ name: 'S1', xml: `${view}<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>` }] });
+    const viewOf = (ops: Op[]) => /<sheetViews>[\s\S]*<\/sheetViews>/.exec(partText(saveXlsx(x, ops), 'xl/worksheets/sheet1.xml')!)![0];
+    // 다른 축 연산: topLeftCell만 밀리고 나머지는 그대로
+    expect(viewOf([{ kind: 'insertCols', sheet: 0, at: 0, count: 2 }])).toBe(view.replace('topLeftCell="A4"', 'topLeftCell="C4"'));
+    expect(viewOf([{ kind: 'insertRows', sheet: 0, at: 10, count: 2 }])).toBe(view);
+    expect(viewOf([{ kind: 'deleteRows', sheet: 0, at: 10, count: 2 }])).toBe(view);
+    // 분할이 바뀌어도 topLeft 선택은 남는다
+    const v = viewOf([{ kind: 'insertRows', sheet: 0, at: 1, count: 1 }]);
+    expect(v).toContain('ySplit="4"');
+    expect(v).toContain('topLeftCell="A5"');
+    expect(v).toContain('pane="topLeft"');
+    expect(v).not.toContain('activePane');
   });
 
   it('두 축이 모두 0이 되면 pane 요소를 지운다', () => {

@@ -1,5 +1,5 @@
 import { MAX_COL, MAX_ROW, colToLetters, parseA1, shiftFormula, shiftRange, shiftSqref, toA1, type Axis, type Shift } from '../core/refs';
-import { shiftFreezeCount } from '../core/layoutOps';
+import { shiftFreezeCount, shiftIndex } from '../core/layoutOps';
 import type { Op, StructuralKind } from '../core/types';
 import { cellsWithIndex, rowsWithIndex } from './cells';
 import { dirOf, readText, relsPathOf, relTargets, workbookPath, type Parts, type SheetInfo } from './package';
@@ -18,17 +18,6 @@ function docOf(ctx: StructuralCtx, path: string): Document | undefined {
     ctx.docs.set(path, doc);
   }
   return doc;
-}
-
-/** 0부터 시작하는 행·열 번호 하나를 옮긴다. 삭제되거나 시트 밖으로 밀리면 null. */
-function shiftIndex(i: number, at: number, count: number, limit: number): number | null {
-  if (count >= 0) {
-    if (i < at) return i;
-    return i + count < limit ? i + count : null;
-  }
-  const end = at - count;
-  if (i < at) return i;
-  return i >= end ? i + count : null;
 }
 
 function removeEl(el: Element): void {
@@ -184,28 +173,34 @@ function shiftPane(doc: Document, axis: Axis, at: number, count: number): void {
   if (state !== 'frozen' && state !== 'frozenSplit') return;
 
   const num = (name: string) => Math.max(0, Number(pane.getAttribute(name) ?? '0') || 0);
-  const rows = axis === 'row' ? shiftFreezeCount(num('ySplit'), at, count) : num('ySplit');
-  const cols = axis === 'col' ? shiftFreezeCount(num('xSplit'), at, count) : num('xSplit');
+  const oldRows = num('ySplit');
+  const oldCols = num('xSplit');
+  const rows = axis === 'row' ? shiftFreezeCount(oldRows, at, count) : oldRows;
+  const cols = axis === 'col' ? shiftFreezeCount(oldCols, at, count) : oldCols;
+  const splitChanged = rows !== oldRows || cols !== oldCols;
   const setSplit = (name: string, n: number) => (n > 0 ? pane.setAttribute(name, String(n)) : pane.removeAttribute(name));
-  setSplit('ySplit', rows);
-  setSplit('xSplit', cols);
+  if (splitChanged) {
+    setSplit('ySplit', rows);
+    setSplit('xSplit', cols);
+  }
 
   const top = pane.getAttribute('topLeftCell');
   if (top && /^[A-Za-z]{1,3}\d+$/.test(top)) {
     const p = parseA1(top);
     const row = axis === 'row' ? shiftIndex(p.row, at, count, MAX_ROW) ?? at : p.row;
     const col = axis === 'col' ? shiftIndex(p.col, at, count, MAX_COL) ?? at : p.col;
-    pane.setAttribute('topLeftCell', toA1(Math.max(row, rows), Math.max(col, cols)));
+    const next = toA1(Math.max(row, rows), Math.max(col, cols));
+    if (next !== top.toUpperCase() && (splitChanged || row !== p.row || col !== p.col)) pane.setAttribute('topLeftCell', next);
   }
 
+  if (!splitChanged) return;
   const valid = new Set(rows > 0 && cols > 0 ? ['topRight', 'bottomLeft', 'bottomRight'] : rows > 0 ? ['bottomLeft'] : cols > 0 ? ['topRight'] : []);
-  const only = [...valid][0];
+  const active = pane.getAttribute('activePane');
   if (valid.size === 0) removeEl(pane);
-  else if (valid.size === 1) pane.setAttribute('activePane', only);
-  else if (!valid.has(pane.getAttribute('activePane') ?? '')) pane.setAttribute('activePane', 'bottomRight');
+  else if (active !== null && !valid.has(active)) pane.setAttribute('activePane', valid.size === 1 ? [...valid][0] : 'bottomRight');
   for (const sel of childElements(view, 'selection')) {
     const name = sel.getAttribute('pane');
-    if (name !== null && !valid.has(name)) removeEl(sel);
+    if (name !== null && name !== 'topLeft' && !valid.has(name)) removeEl(sel);
   }
 }
 
