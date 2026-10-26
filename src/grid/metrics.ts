@@ -56,8 +56,9 @@ export function colWidthPx(width: number, mdw: number): number {
 }
 
 export function defaultColWidthPx(layout: SheetLayout, mdw: number): number {
-  const w = layout.defaultColWidth ?? Math.trunc(((layout.baseColWidth * mdw + 5) / mdw) * 256) / 256;
-  return colWidthPx(w, mdw);
+  if (layout.defaultColWidth !== undefined) return colWidthPx(layout.defaultColWidth, mdw);
+  const px = colWidthPx(Math.trunc(((layout.baseColWidth * mdw + 5) / mdw) * 256) / 256, mdw);
+  return Math.ceil(px / 8) * 8; // ECMA-376: 기본 너비는 8px 배수로 올림
 }
 
 export function rowHeightPx(pt: number): number {

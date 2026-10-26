@@ -13,7 +13,7 @@ describe('metrics', () => {
   });
   it('기본 열 너비: defaultColWidth가 있으면 그것, 없으면 baseColWidth 규칙', () => {
     const L = emptyLayout();
-    expect(defaultColWidthPx(L, 7)).toBe(61);
+    expect(defaultColWidthPx(L, 7)).toBe(64);
     expect(defaultColWidthPx({ ...L, defaultColWidth: 13.7109375 }, 7)).toBe(96);
   });
   it('최대 숫자 폭 표', () => {
