@@ -4,7 +4,9 @@ use tauri::{AppHandle, Emitter, EventTarget, Wry};
 use crate::windows;
 
 /// 프론트엔드로 전달하는 메뉴 id (= "menu" 이벤트 payload).
-const IDS: [&str; 8] = ["new", "open", "save", "close", "undo", "redo", "insert", "delete"];
+const IDS: [&str; 11] = [
+    "new", "open", "save", "close", "undo", "redo", "insert", "delete", "bold", "italic", "underline",
+];
 
 fn item(app: &AppHandle, id: &str, text: &str, accel: &str) -> tauri::Result<MenuItem<Wry>> {
     MenuItem::with_id(app, id, text, true, Some(accel))
@@ -62,7 +64,17 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             &item(app, "delete", "행/열 삭제", "CmdOrCtrl+Minus")?,
         ],
     )?;
-    Menu::with_items(app, &[&app_menu, &file, &edit, &sheet])
+    let format = Submenu::with_items(
+        app,
+        "서식",
+        true,
+        &[
+            &item(app, "bold", "굵게", "CmdOrCtrl+B")?,
+            &item(app, "italic", "기울임꼴", "CmdOrCtrl+I")?,
+            &item(app, "underline", "밑줄", "CmdOrCtrl+U")?,
+        ],
+    )?;
+    Menu::with_items(app, &[&app_menu, &file, &edit, &sheet, &format])
 }
 
 pub fn on_event(app: &AppHandle, event: MenuEvent) {

@@ -4,7 +4,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { message, open, save } from '@tauri-apps/plugin-dialog';
-import type { Op } from '../core/types';
+import type { Op, StylePatch } from '../core/types';
 import { buildRowView, distinctValues } from '../core/view';
 import { DocumentStore } from '../document/store';
 import { tauriIo } from '../document/io';
@@ -16,6 +16,7 @@ import type { CellEdit } from './paste';
 import type { ContextMenuRequest, Selection } from './selectionTypes';
 import { SheetTabs } from './SheetTabs';
 import { SidePanel } from './SidePanel';
+import { Toolbar, toolbarState } from './Toolbar';
 import { argsToOps, shiftFilterCol, structuralArgs, type StructuralAction } from './structure';
 import { TopBar } from './TopBar';
 import { useStore } from './useStore';
@@ -55,6 +56,13 @@ async function saveDocument(store: DocumentStore, flushEdits: () => void): Promi
         ],
       });
       if (!path) return false;
+      if (/\.csv$/i.test(path) && store.hasFormatting) {
+        const answer = await message('csv에는 서식이 저장되지 않습니다. 계속할까요?', {
+          kind: 'warning',
+          buttons: { ok: '계속', cancel: '취소' },
+        });
+        if (answer !== '계속' && answer !== 'Ok') return false;
+      }
       await store.save(path);
       await invoke('set_document_path', { path });
     } else {
@@ -102,6 +110,8 @@ function computeRows(store: DocumentStore, sheet: number, v: Omit<ViewState, 'ro
   return rows;
 }
 
+type FontToggle = 'bold' | 'italic' | 'underline';
+
 const ROW_ACTIONS: [string, StructuralAction][] = [
   ['위에 행 삽입', 'insertAbove'],
   ['아래에 행 삽입', 'insertBelow'],
@@ -119,6 +129,7 @@ async function handleMenu(
   id: string,
   structural: (action: StructuralAction) => void,
   after: (ops: Op[] | null, undo: boolean) => void,
+  toggleFont: (kind: FontToggle) => void,
 ): Promise<void> {
   switch (id) {
     case 'new':
@@ -142,6 +153,11 @@ async function handleMenu(
     case 'insert':
     case 'delete':
       if (!isTextInput(document.activeElement)) structural(id === 'insert' ? 'insertShortcut' : 'deleteShortcut');
+      break;
+    case 'bold':
+    case 'italic':
+    case 'underline':
+      if (!isTextInput(document.activeElement)) toggleFont(id);
       break;
   }
 }
@@ -221,7 +237,14 @@ export function App() {
   }, [store.path, name]);
 
   useTauriListener(() => getCurrentWebviewWindow().listen<string>('menu', (e) => {
-      handleMenu(store, flushEdits, e.payload, (a) => runStructural.current(a), (ops, undo) => afterHistory.current(ops, undo)).catch(showError);
+      handleMenu(
+        store,
+        flushEdits,
+        e.payload,
+        (a) => runStructural.current(a),
+        (ops, undo) => afterHistory.current(ops, undo),
+        (kind) => toggleFont.current(kind),
+      ).catch(showError);
     }));
 
   useTauriListener(() =>
@@ -311,16 +334,96 @@ export function App() {
   const isCsv = wb.kind === 'csv';
   const onResize = useCallback(
     (e: ResizeEvent) => {
-      // xlsx 크기 조절은 Task 15·16에서 Op로 연결한다. 그 전까지는 무시한다.
-      if (!isCsv) return;
-      setSessionSizes((prev) =>
-        e.kind === 'col'
-          ? { ...prev, cols: new Map([...prev.cols, ...e.cols.map((c): [number, number] => [c, e.px])]) }
-          : { ...prev, rows: new Map([...prev.rows, ...e.rows.map((r): [number, number] => [r, e.px])]) },
-      );
+      if (isCsv) {
+        // csv는 크기를 저장하지 않으므로 이 창에서만 적용한다
+        setSessionSizes((prev) =>
+          e.kind === 'col'
+            ? { ...prev, cols: new Map([...prev.cols, ...e.cols.map((c): [number, number] => [c, e.px])]) }
+            : { ...prev, rows: new Map([...prev.rows, ...e.rows.map((r): [number, number] => [r, e.px])]) },
+        );
+        return;
+      }
+      if (store.saving) return;
+      try {
+        const sheetIndex = currentRef.current;
+        const reason = e.kind === 'col' ? store.setColWidth(sheetIndex, e.cols, e.px) : store.setRowHeight(sheetIndex, e.rows, e.px);
+        if (reason !== null) void message(reason, { kind: 'warning' });
+      } catch (err) {
+        showError(err);
+      }
     },
-    [isCsv],
+    [isCsv, store],
   );
+
+  // ── 서식 ────────────────────────────────────────────────
+  const formatDisabled = isCsv || store.saving;
+
+  const applyFormat = useCallback(
+    (patch: StylePatch) => {
+      const grid = gridRef.current;
+      if (!grid || store.saving || store.wb.kind === 'csv') return;
+      const area = grid.formatArea();
+      try {
+        const reason = store.formatCells(currentRef.current, { rows: area.rows, c1: area.c1, c2: area.c2 }, patch);
+        if (reason !== null) void message(reason, { kind: 'warning' });
+      } catch (e) {
+        showError(e);
+      }
+      grid.focus();
+    },
+    [store],
+  );
+
+  const toggleFont = useRef<(kind: FontToggle) => void>(() => {});
+  toggleFont.current = (kind) => {
+    const sel = selectionRef.current;
+    if (!sel || store.saving || store.wb.kind === 'csv') return;
+    const state = toolbarState(store.wb, currentRef.current, sel);
+    if (kind === 'bold') applyFormat({ font: { bold: !state.bold } });
+    else if (kind === 'italic') applyFormat({ font: { italic: !state.italic } });
+    else applyFormat({ font: { underline: state.underline ? undefined : 'single' } });
+  };
+
+  const onMerge = useCallback(async () => {
+    const grid = gridRef.current;
+    if (!grid || store.saving) return;
+    const sheetIndex = currentRef.current;
+    const area = grid.formatArea();
+    try {
+      const check = store.mergeCheck(sheetIndex, area.range, area.mergeRows);
+      if (!check.ok) {
+        void message(check.reason, { kind: 'warning' });
+        return;
+      }
+      if (check.lossy) {
+        const answer = await message('병합하면 왼쪽 위 칸의 값만 남습니다. 계속할까요?', {
+          kind: 'warning',
+          buttons: { ok: '병합', cancel: '취소' },
+        });
+        if (answer !== '병합' && answer !== 'Ok') return;
+      }
+      const reason = store.merge(sheetIndex, area.range, area.mergeRows, { align: { horizontal: 'center' } });
+      if (reason !== null) void message(reason, { kind: 'warning' });
+    } catch (e) {
+      showError(e);
+    } finally {
+      gridRef.current?.focus();
+    }
+  }, [store]);
+
+  const onUnmerge = useCallback(() => {
+    const grid = gridRef.current;
+    if (!grid || store.saving) return;
+    try {
+      const reason = store.unmerge(currentRef.current, grid.formatArea().range);
+      if (reason !== null) void message(reason, { kind: 'warning' });
+    } catch (e) {
+      showError(e);
+    }
+    grid.focus();
+  }, [store]);
+
+  const focusGrid = useCallback(() => gridRef.current?.focus(), []);
 
   const onQuery = useCallback(
     (query: string) => {
@@ -394,6 +497,16 @@ export function App() {
         dirty={dirty}
         saving={store.saving}
         onSave={() => void saveDocument(store, flushEdits)}
+      />
+      <Toolbar
+        wb={wb}
+        sheet={current}
+        anchor={selection && selection.sheet === current ? selection : null}
+        disabled={formatDisabled}
+        onFormat={applyFormat}
+        onMerge={() => void onMerge()}
+        onUnmerge={onUnmerge}
+        onDone={focusGrid}
       />
       <FormulaBar ref={formulaRef} store={store} selection={selection} />
       <div className="main">

@@ -384,3 +384,18 @@ it('저장 중에는 서식 편집이 막힌다', async () => {
   expect(() => st.formatCells(0, { rows: [0], c1: 0, c2: 0 }, BOLD)).toThrow('저장 중');
   await p;
 });
+
+// ---- 병합하고 가운데 맞춤 (Task 16)
+it('merge에 서식을 주면 병합과 가운데 맞춤이 되돌리기 한 단계다', () => {
+  const { st } = newBook([['a', 'b'], ['c', 'd']]);
+  const r = { r1: 0, c1: 0, r2: 1, c2: 1 };
+  expect(st.merge(0, r, 'all', { align: { horizontal: 'center' } })).toBeNull();
+  expect(st.wb.sheets[0].layout.merges).toEqual([r]);
+  for (const [row, col] of [[0, 0], [0, 1], [1, 0], [1, 1]]) {
+    expect(st.wb.styles.xfs[sid(st, row, col)].alignment?.horizontal).toBe('center');
+  }
+  st.undo();
+  expect(st.wb.sheets[0].layout.merges).toEqual([]);
+  expect(sid(st, 0, 0)).toBe(0);
+  expect(getCell(st.wb.sheets[0], 1, 1)?.value).toBe('d');
+});

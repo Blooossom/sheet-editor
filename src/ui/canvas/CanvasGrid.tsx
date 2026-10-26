@@ -6,11 +6,11 @@ import { colEdgeX, hitTest, pointToCell, rowEdgeY } from '../../grid/hit';
 import { contextTarget, gridKeyAction, resizeTargets } from '../../grid/interaction';
 import { colWidthPx, defaultColWidthPx, maxDigitWidth, rowHeightPx } from '../../grid/metrics';
 import { effectiveXf, StyleResolver } from '../../grid/resolve';
-import { expandForMerges, move, toSelection, type GridSel, type MoveKey } from '../../grid/selection';
+import { expandForMerges, formatArea, move, toSelection, type GridSel, type MoveKey } from '../../grid/selection';
 import { makeMeasure } from '../../grid/textLayout';
 import { colInfo } from '../../xlsx/layout';
 import { pasteEdits, type CellEdit } from '../paste';
-import type { ContextMenuRequest, Selection } from '../selectionTypes';
+import type { ContextMenuRequest, FormatArea, Selection } from '../selectionTypes';
 import { useStore } from '../useStore';
 import { CellEditor, editorBox, editorKeyAction, idleInputAction, type EditorKeyAction } from './CellEditor';
 import { clearEdits, copyText, parseTsv } from './clipboard';
@@ -39,6 +39,10 @@ export interface CanvasGridProps {
 export interface CanvasGridHandle {
   /** 편집 중인 칸을 확정한다(저장·닫기 전). 편집 중이 아니면 아무것도 하지 않는다. */
   commitEditor(): void;
+  /** 지금 선택의 서식·병합 대상 */
+  formatArea(): FormatArea;
+  /** 표에 키보드 포커스를 돌려준다(도구 막대 사용 뒤) */
+  focus(): void;
 }
 
 /** 편집 중인 칸. row는 화면 행, orig는 원래 행(병합이면 앵커 칸) */
@@ -134,8 +138,8 @@ export const CanvasGrid = forwardRef<CanvasGridHandle, CanvasGridProps>(function
   }, [rowView, model.rowCount]);
 
   // 이벤트 처리기가 항상 최신 값을 보도록 둔다
-  const live = useRef({ geometry, sel, size, headerW, lastRow, lastCol });
-  live.current = { geometry, sel, size, headerW, lastRow, lastCol };
+  const live = useRef({ geometry, sel, size, headerW, lastRow, lastCol, rowView });
+  live.current = { geometry, sel, size, headerW, lastRow, lastCol, rowView };
 
   // 글꼴 문자열마다 측정기 하나(프레임 사이에 재사용)
   const measures = useRef(new Map<string, (s: string) => number>());
@@ -391,7 +395,18 @@ export const CanvasGrid = forwardRef<CanvasGridHandle, CanvasGridProps>(function
 
   const closeRef = useRef(closeEditor);
   closeRef.current = closeEditor;
-  useImperativeHandle(ref, () => ({ commitEditor: () => void closeRef.current(true) }), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      commitEditor: () => void closeRef.current(true),
+      formatArea: () => {
+        const { sel: s, rowView: rv, geometry: g, lastRow: lr, lastCol: lc } = live.current;
+        return formatArea(s, rv, g, lr, lc);
+      },
+      focus: () => inputRef.current?.focus({ preventScroll: true }),
+    }),
+    [],
+  );
   // 시트를 바꾸는 등으로 표가 사라질 때 편집 중이던 값을 잃지 않는다(레이아웃 정리는 입력창 ref가 떨어지기 전에 돈다)
   useLayoutEffect(() => () => void closeRef.current(true), []);
 

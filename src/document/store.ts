@@ -362,13 +362,15 @@ export class DocumentStore {
     return out.sort((a, b) => a.row - b.row || a.col - b.col);
   }
 
-  merge(sheet: number, range: CellRange, rows: number[] | 'all'): string | null {
+  /** patch를 주면 병합한 범위에 서식도 같은 단계로 적용한다(병합하고 가운데 맞춤). */
+  merge(sheet: number, range: CellRange, rows: number[] | 'all', patch?: StylePatch): string | null {
     this.assertIdle();
     const check = this.mergeCheck(sheet, range, rows);
     if (!check.ok) return check.reason;
     const t = this.mergeTarget(sheet, range);
     if (t.r1 === t.r2 && t.c1 === t.c2) return null;
     if (this.wb.sheets[sheet].layout.merges.some((m) => m.r1 === t.r1 && m.c1 === t.c1 && m.r2 === t.r2 && m.c2 === t.c2)) return null;
+    if (patch && (t.r2 - t.r1 + 1) * (t.c2 - t.c1 + 1) > MAX_FORMAT_CELLS) return FORMAT_CAP_MESSAGE;
     // 값은 지우되 서식은 남긴다. 칸 항목을 없애면 행·열 서식으로 바뀌어 보이므로(R1) styleId 0도 명시한다.
     const ops: Op[] = this.nonAnchorCells(sheet, t).map(({ row, col, cell }) => ({
       kind: 'set',
@@ -378,6 +380,10 @@ export class DocumentStore {
       cell: { value: null, styleId: cell.styleId ?? 0, edited: true },
     }));
     ops.push({ kind: 'merge', sheet, range: t });
+    if (patch && Object.keys(patch).length > 0) {
+      const rowsOfT = Array.from({ length: t.r2 - t.r1 + 1 }, (_, i) => t.r1 + i);
+      ops.push({ kind: 'style', sheet, rows: rowsOfT, c1: t.c1, c2: t.c2, patch });
+    }
     this.commit(ops, true);
     return null;
   }
