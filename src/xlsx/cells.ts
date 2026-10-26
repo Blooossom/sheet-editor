@@ -8,12 +8,12 @@ const NS_XML = 'http://www.w3.org/XML/1998/namespace';
 const BEFORE_SHEET_DATA = new Set(['sheetPr', 'dimension', 'sheetViews', 'sheetFormatPr', 'cols']);
 
 // 새 요소는 루트와 같은 네임스페이스·접두어로 만든다 (x:worksheet 같은 접두어 문서 대응)
-function makeEl(doc: Document, localName: string): Element {
+export function makeEl(doc: Document, localName: string): Element {
   const root = doc.documentElement;
   return doc.createElementNS(root.namespaceURI, root.prefix ? `${root.prefix}:${localName}` : localName);
 }
 
-function sheetDataOf(doc: Document, create: boolean): Element | undefined {
+export function sheetDataOf(doc: Document, create: boolean): Element | undefined {
   const root = doc.documentElement;
   const found = childElements(root, 'sheetData')[0];
   if (found || !create) return found;

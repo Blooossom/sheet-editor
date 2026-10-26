@@ -1,5 +1,7 @@
-import type { Op } from '../core/types';
+import type { Op, SheetLayout, StyleTable } from '../core/types';
 import { expandSharedFormulas, setCellInSheet } from './cells';
+import { readStyles } from './styles';
+import { applyStyleOp, flushStyles, layoutOfDoc } from './stylesWrite';
 import { applyStructural } from './structure';
 import { dirOf, readText, relsPathOf, relTargets, sheetInfos, unzipParts, workbookPath, writeText, zipParts, type Parts, type SheetInfo } from './package';
 import { childElements, parseXml, serializeXml } from './xml';
@@ -13,11 +15,14 @@ export interface SaveContext {
   dirty: Set<string>; // 다시 직렬화할 파트 경로
   expandedSheets: Set<string>; // 공유 수식을 이미 푼 시트 경로
   getDoc(path: string): Document;
+  readonly styles: StyleTable; // 원본 styles.xml로 처음 쓸 때 만든다. style Op가 화면 모델과 같은 순서로 새 항목을 더한다
+  layoutOf(sheet: number): SheetLayout; // 지금 시트 DOM의 열 구간·행 정보·병합
 }
 
 export function createSaveContext(original: Uint8Array): SaveContext {
   const parts = unzipParts(original);
   const docs = new Map<string, Document>();
+  let styles: StyleTable | undefined;
   const ctx: SaveContext = {
     parts,
     sheets: sheetInfos(parts),
@@ -33,6 +38,12 @@ export function createSaveContext(original: Uint8Array): SaveContext {
         docs.set(path, doc);
       }
       return doc;
+    },
+    get styles() {
+      return (styles ??= readStyles(parts));
+    },
+    layoutOf(sheet) {
+      return layoutOfDoc(sheetDoc(ctx, sheet));
     },
   };
   return ctx;
@@ -63,6 +74,13 @@ export function applyOp(ctx: SaveContext, op: Op): void {
       // 모든 시트의 수식을 옮기므로, 시트마다 공유 수식을 먼저 푼다
       ctx.sheets.forEach((_s, i) => sheetDoc(ctx, i));
       applyStructural(ctx, op);
+      return;
+    case 'style':
+    case 'colWidth':
+    case 'rowHeight':
+    case 'merge':
+    case 'unmerge':
+      applyStyleOp(ctx, op);
       return;
   }
 }
@@ -108,6 +126,7 @@ function removeCalcChain(ctx: SaveContext, wbPath: string): void {
 }
 
 export function finishSave(ctx: SaveContext): Uint8Array {
+  flushStyles(ctx);
   const wbPath = workbookPath(ctx.parts);
   setFullCalcOnLoad(ctx.getDoc(wbPath));
   ctx.dirty.add(wbPath);
