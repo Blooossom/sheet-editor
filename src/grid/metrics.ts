@@ -64,3 +64,15 @@ export function defaultColWidthPx(layout: SheetLayout, mdw: number): number {
 export function rowHeightPx(pt: number): number {
   return Math.round((pt * 4) / 3);
 }
+
+/** colWidthPx의 역: colWidthPx(pxToColWidth(px, mdw), mdw) === px. 파일 너비는 1/256 단위로 올려 잘림 오차를 막는다. */
+export function pxToColWidth(px: number, mdw: number): number {
+  let w = Math.ceil((px / mdw) * 256) / 256;
+  while (colWidthPx(w, mdw) < px) w += 1 / 256;
+  return w;
+}
+
+/** rowHeightPx의 역: rowHeightPx(pxToPt(px)) === px. */
+export function pxToPt(px: number): number {
+  return (px * 3) / 4;
+}

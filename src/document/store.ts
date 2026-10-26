@@ -2,7 +2,9 @@ import { emptyLayout } from '../xlsx/layout';
 import { defaultStyleTable } from '../xlsx/styles';
 import { applyOp, cloneWorkbook, getCell, makeSetOp, replay, structuralBlockReason } from '../core/ops';
 import { displayText, editText } from '../core/display';
-import type { Op, StructuralKind, WorkbookModel } from '../core/types';
+import type { Cell, CellRange, Op, StructuralKind, StylePatch, WorkbookModel } from '../core/types';
+import { MAX_COL, MAX_ROW, parseA1 } from '../core/refs';
+import { maxDigitWidth, pxToColWidth, pxToPt } from '../grid/metrics';
 import { DEFAULT_DIALECT, csvToWorkbook, detectDialect, parseCsv, serializeCsv, workbookToCsvRows } from '../csv/csv';
 import type { CsvDialect } from '../csv/csv';
 import { recalcWorkbook } from '../formula/recalc';
@@ -15,6 +17,10 @@ export type Source =
   | { format: 'xlsx'; bytes: Uint8Array }
   | { format: 'csv'; dialect: CsvDialect; encoding: 'utf-8' | 'euc-kr'; bom: boolean }
   | { format: 'new' };
+
+const CSV_BLOCK = '이 형식(csv)은 서식을 저장할 수 없습니다.';
+const MAX_FORMAT_CELLS = 200000;
+const FORMAT_CAP_MESSAGE = '한 번에 서식을 바꿀 수 있는 칸은 200,000개까지입니다.';
 
 function formatOf(path: string): 'xlsx' | 'csv' {
   const m = /\.([^./\\]+)$/.exec(path);
@@ -218,6 +224,177 @@ export class DocumentStore {
     recalcWorkbook(this.wb);
     this.changed();
     return null;
+  }
+
+  /** ops를 한 단계로 적용한다. 도중에 던지면 단계를 만들지 않고 이전 상태로 되돌린다. */
+  private commit(ops: Op[], recalc = false): void {
+    try {
+      for (const op of ops) applyOp(this.wb, op);
+    } catch (err) {
+      this.rebuild();
+      this.changed();
+      throw err;
+    }
+    this.steps.push(ops);
+    this.redoStack = [];
+    if (recalc) recalcWorkbook(this.wb);
+    this.changed();
+  }
+
+  /**
+   * 서식 적용. 차단 이유 또는 null.
+   * - rows는 원래 행 번호. 필터면 보이는 행만 넘어오므로 그 행에만 적용한다.
+   * - 전체 열 선택(rows가 마지막 행까지)은 rowCount로, 전체 행 선택(c1=0, c2가 마지막 열)은 colCount로 줄인다.
+   * - 병합 일부를 덮으면 열은 c1·c2를 넓힌다. 행은 rows가 연속일 때(필터 없음)만 병합 행까지 더한다. 필터 중에는 안 보이는 행을 건드리지 않는다.
+   */
+  formatCells(sheet: number, sel: { rows: number[]; c1: number; c2: number }, patch: StylePatch): string | null {
+    this.assertIdle();
+    if (this.wb.kind === 'csv') return CSV_BLOCK;
+    const sh = this.wb.sheets[sheet];
+    let rows = [...new Set(sel.rows)].sort((a, b) => a - b);
+    let c1 = sel.c1;
+    let c2 = sel.c2;
+    if (rows.length > 0 && rows[rows.length - 1] >= MAX_ROW - 1) rows = rows.filter((r) => r < sh.rowCount);
+    if (c1 === 0 && c2 >= MAX_COL - 1) c2 = sh.colCount - 1;
+    if (rows.length === 0 || c2 < c1) return null;
+
+    const contiguous = rows[rows.length - 1] - rows[0] + 1 === rows.length;
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const m of sh.layout.merges) {
+        if (m.c2 < c1 || m.c1 > c2 || !rows.some((r) => r >= m.r1 && r <= m.r2)) continue;
+        if (m.c1 < c1 || m.c2 > c2) {
+          c1 = Math.min(c1, m.c1);
+          c2 = Math.max(c2, m.c2);
+          changed = true;
+        }
+        if (contiguous && (m.r1 < rows[0] || m.r2 > rows[rows.length - 1])) {
+          const lo = Math.min(rows[0], m.r1);
+          const hi = Math.max(rows[rows.length - 1], m.r2);
+          rows = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
+          changed = true;
+        }
+      }
+    }
+    if (rows.length * (c2 - c1 + 1) > MAX_FORMAT_CELLS) return FORMAT_CAP_MESSAGE;
+    this.commit([{ kind: 'style', sheet, rows, c1, c2, patch }]);
+    return null;
+  }
+
+  /** 열 너비(px). null = 기본 너비. 연속 구간마다 Op 하나, 전체가 한 단계. */
+  setColWidth(sheet: number, cols: number[], width: number | null): string | null {
+    this.assertIdle();
+    if (this.wb.kind === 'csv') return CSV_BLOCK;
+    if (width !== null && !(width > 0)) return '올바른 크기가 아닙니다.';
+    const groups = runs(cols);
+    if (groups.length === 0) return null;
+    const chars = width === null ? null : pxToColWidth(width, maxDigitWidth(this.wb.styles.fonts[0]));
+    this.commit(groups.map((g) => ({ kind: 'colWidth', sheet, c1: g.start, c2: g.start + g.count - 1, width: chars })));
+    return null;
+  }
+
+  /** 행 높이(px). null = 기본 높이. */
+  setRowHeight(sheet: number, rows: number[], height: number | null): string | null {
+    this.assertIdle();
+    if (this.wb.kind === 'csv') return CSV_BLOCK;
+    if (height !== null && !(height > 0)) return '올바른 크기가 아닙니다.';
+    const sorted = [...new Set(rows)].sort((a, b) => a - b);
+    if (sorted.length === 0) return null;
+    this.commit([{ kind: 'rowHeight', sheet, rows: sorted, height: height === null ? null : pxToPt(height) }]);
+    return null;
+  }
+
+  /** 범위와 일부만 겹치는 병합은 통째로 포함하도록 넓힌다(addMerge가 겹친 병합을 통째로 지우므로). */
+  private mergeTarget(sheet: number, range: CellRange): CellRange {
+    const merges = this.wb.sheets[sheet].layout.merges;
+    const t = { ...range };
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const m of merges) {
+        if (m.r2 < t.r1 || m.r1 > t.r2 || m.c2 < t.c1 || m.c1 > t.c2) continue;
+        const next = { r1: Math.min(t.r1, m.r1), c1: Math.min(t.c1, m.c1), r2: Math.max(t.r2, m.r2), c2: Math.max(t.c2, m.c2) };
+        if (next.r1 !== t.r1 || next.c1 !== t.c1 || next.r2 !== t.r2 || next.c2 !== t.c2) {
+          Object.assign(t, next);
+          changed = true;
+        }
+      }
+    }
+    return t;
+  }
+
+  /** rows: 화면에 보이는 원래 행 번호(생략하면 range의 모든 행). range 행을 빠짐없이 덮지 않으면 필터 중으로 본다. */
+  mergeCheck(sheet: number, range: CellRange, rows?: number[]): { ok: true; lossy: boolean } | { ok: false; reason: string } {
+    if (this.wb.kind === 'csv') return { ok: false, reason: CSV_BLOCK };
+    if (rows) {
+      const n = new Set(rows).size;
+      if (n !== range.r2 - range.r1 + 1 || Math.min(...rows) !== range.r1 || Math.max(...rows) !== range.r2) {
+        return { ok: false, reason: '필터를 해제한 뒤 병합하세요.' };
+      }
+    }
+    const sh = this.wb.sheets[sheet];
+    const t = this.mergeTarget(sheet, range);
+    for (const table of sh.tables) {
+      const [a, b] = table.ref.split(':');
+      const s = parseA1(a);
+      const e = parseA1(b ?? a);
+      if (!(e.row < t.r1 || s.row > t.r2 || e.col < t.c1 || s.col > t.c2)) {
+        return { ok: false, reason: '표(table) 안에서는 병합할 수 없습니다.' };
+      }
+    }
+    return { ok: true, lossy: this.nonAnchorCells(sheet, t).length > 0 };
+  }
+
+  /** 앵커(왼쪽 위)를 뺀 값·수식이 있는 칸 */
+  private nonAnchorCells(sheet: number, t: CellRange): { row: number; col: number; cell: Cell }[] {
+    const out: { row: number; col: number; cell: Cell }[] = [];
+    for (const [row, cols] of this.wb.sheets[sheet].cells) {
+      if (row < t.r1 || row > t.r2) continue;
+      for (const [col, cell] of cols) {
+        if (col < t.c1 || col > t.c2 || (row === t.r1 && col === t.c1)) continue;
+        if (cell.value !== null || cell.formula !== undefined) out.push({ row, col, cell });
+      }
+    }
+    return out.sort((a, b) => a.row - b.row || a.col - b.col);
+  }
+
+  merge(sheet: number, range: CellRange, rows?: number[]): string | null {
+    this.assertIdle();
+    const check = this.mergeCheck(sheet, range, rows);
+    if (!check.ok) return check.reason;
+    const t = this.mergeTarget(sheet, range);
+    if (t.r1 === t.r2 && t.c1 === t.c2) return null;
+    if (this.wb.sheets[sheet].layout.merges.some((m) => m.r1 === t.r1 && m.c1 === t.c1 && m.r2 === t.r2 && m.c2 === t.c2)) return null;
+    // 값은 지우되 서식은 남긴다(칸 항목을 없애면 행·열 서식으로 바뀌어 보인다)
+    const ops: Op[] = this.nonAnchorCells(sheet, t).map(({ row, col, cell }) => ({
+      kind: 'set',
+      sheet,
+      row,
+      col,
+      cell: cell.styleId === undefined ? null : { value: null, styleId: cell.styleId, edited: true },
+    }));
+    ops.push({ kind: 'merge', sheet, range: t });
+    this.commit(ops, true);
+    return null;
+  }
+
+  unmerge(sheet: number, range: CellRange): string | null {
+    this.assertIdle();
+    if (this.wb.kind === 'csv') return CSV_BLOCK;
+    const hit = this.wb.sheets[sheet].layout.merges.some((m) => !(m.r2 < range.r1 || m.r1 > range.r2 || m.c2 < range.c1 || m.c1 > range.c2));
+    if (!hit) return null;
+    this.commit([{ kind: 'unmerge', sheet, range }]);
+    return null;
+  }
+
+  /** 현재 상태가 기본 서식 외 서식(칸 서식·열 너비·행 높이·병합)을 쓰는지. csv는 항상 false. */
+  get hasFormatting(): boolean {
+    if (this.wb.kind === 'csv') return false;
+    for (const sh of this.wb.sheets) {
+      const l = sh.layout;
+      if (l.merges.length > 0 || l.rows.size > 0 || l.colRuns.length > 0) return true;
+      for (const cols of sh.cells.values()) for (const cell of cols.values()) if (cell.styleId) return true;
+    }
+    return false;
   }
 
   /** 되돌린 단계의 연산들(원래 적용된 방향). 되돌릴 것이 없으면 null. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { colWidthPx, defaultColWidthPx, fontCss, maxDigitWidth, rowHeightPx } from '../../src/grid/metrics';
+import { colWidthPx, defaultColWidthPx, fontCss, maxDigitWidth, pxToColWidth, pxToPt, rowHeightPx } from '../../src/grid/metrics';
 import { emptyLayout } from '../../src/xlsx/layout';
 
 describe('metrics', () => {
@@ -10,6 +10,13 @@ describe('metrics', () => {
   it('행 높이를 px로 환산한다', () => {
     expect(rowHeightPx(15)).toBe(20);
     expect(rowHeightPx(16.5)).toBe(22);
+  });
+  it('px → 열 너비·pt 변환은 colWidthPx·rowHeightPx의 역이다', () => {
+    for (const mdw of [5, 6, 7, 8, 9, 12]) {
+      for (let px = 1; px <= 2000; px++) expect(colWidthPx(pxToColWidth(px, mdw), mdw)).toBe(px);
+    }
+    for (let px = 1; px <= 2000; px++) expect(rowHeightPx(pxToPt(px))).toBe(px);
+    expect(pxToPt(20)).toBe(15);
   });
   it('기본 열 너비: defaultColWidth가 있으면 그것, 없으면 baseColWidth 규칙', () => {
     const L = emptyLayout();
