@@ -17,7 +17,7 @@ const BORDERS = '<borders count="2"><border><left/><right/><top/><bottom/><diago
 const XFS = '<cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="center"/></xf><xf numFmtId="176" fontId="1" fillId="2" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"><alignment vertical="center"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" quotePrefix="1"><alignment vertical="center"/></xf><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"><alignment vertical="center"/><protection locked="0"/></xf></cellXfs>';
 const STYLES = `<styleSheet xmlns="${NS}"><numFmts count="1"><numFmt numFmtId="176" formatCode="m&quot;월&quot; d&quot;일&quot;"/></numFmts>${FONTS}${FILLS}${BORDERS}<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"><alignment vertical="center"/></xf></cellStyleXfs>${XFS}<cellStyles count="1"><cellStyle name="표준" xfId="0" builtinId="0"/></cellStyles><dxfs count="0"/><tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/></styleSheet>`;
 
-const SHEET1 = `<dimension ref="A1:F8"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="16.5"/><cols><col min="1" max="5" width="10.625" customWidth="1"/><col min="7" max="7" width="9" style="1" customWidth="1"/><col min="9" max="9" width="9" customWidth="1"/><col min="10" max="10" width="9" customWidth="1"/></cols><sheetData><row r="1"><c r="A1" s="1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1" s="2" t="inlineStr"><is><t>x</t></is></c><c r="D1"/><c r="G1"/></row><row r="2" s="3" customFormat="1"><c r="A2"><v>3</v></c><c r="C2" s="0"/><c r="E2"/></row><row r="4" ht="20" customHeight="1"><c r="B4" s="3"><v>4</v></c></row></sheetData><conditionalFormatting sqref="A1"><cfRule type="expression" priority="1"><formula>TRUE</formula></cfRule></conditionalFormatting><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>`;
+const SHEET1 = `<dimension ref="A1:F8"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="16.5"/><cols><col min="1" max="5" width="10.625" customWidth="1"/><col min="7" max="7" width="9" style="1" customWidth="1"/><col min="9" max="9" width="9" customWidth="1"/><col min="10" max="10" width="9" customWidth="1"/><col min="15" max="15" width="9" bestFit="1" customWidth="1"/><col min="16" max="17" outlineLevel="1"/></cols><sheetData><row r="1"><c r="A1" s="1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1" s="2" t="inlineStr"><is><t>x</t></is></c><c r="D1"/><c r="G1"/></row><row r="2" s="3" customFormat="1"><c r="A2"><v>3</v></c><c r="C2" s="0"/><c r="E2"/></row><row r="4" ht="20" customHeight="1"><c r="B4" s="3"><v>4</v></c></row></sheetData><conditionalFormatting sqref="A1"><cfRule type="expression" priority="1"><formula>TRUE</formula></cfRule></conditionalFormatting><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>`;
 const SHEET2 = `<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData><mergeCells count="2"><mergeCell ref="A1:B2"/><mergeCell ref="D4:E5"/></mergeCells><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>`;
 
 const SRC = (styles = STYLES) => buildXlsx({ styles, sheets: [{ name: 'S1', xml: SHEET1 }, { name: 'S2', xml: SHEET2 }] });
@@ -171,10 +171,10 @@ describe('열 너비·행 높이·병합 저장', () => {
     const src = SRC();
     const ops: Op[] = [{ kind: 'colWidth', sheet: 0, c1: 2, c2: 2, width: 20 }];
     const xml = partText(saveXlsx(src, ops), 'xl/worksheets/sheet1.xml')!;
-    expect(xml).toContain('<cols><col min="1" max="2" width="10.625" customWidth="1"/><col min="3" max="3" width="20" customWidth="1"/><col min="4" max="5" width="10.625" customWidth="1"/><col min="7" max="7" width="9" style="1" customWidth="1"/><col min="9" max="9" width="9" customWidth="1"/><col min="10" max="10" width="9" customWidth="1"/></cols>');
+    expect(xml).toContain('<cols><col min="1" max="2" width="10.625" customWidth="1"/><col min="3" max="3" width="20" customWidth="1"/><col min="4" max="5" width="10.625" customWidth="1"/><col min="7" max="7" width="9" style="1" customWidth="1"/><col min="9" max="9" width="9" customWidth="1"/><col min="10" max="10" width="9" customWidth="1"/><col min="15" max="15" width="9" bestFit="1" customWidth="1"/><col min="16" max="17" outlineLevel="1"/></cols>');
     // 대상(K열)에 닿는 J열만 합치고, 서로 같은 I·J는 그대로 둔다(layoutOps.setColWidth)
     const k: Op[] = [{ kind: 'colWidth', sheet: 0, c1: 10, c2: 10, width: 9 }];
-    expect(partText(saveXlsx(src, k), 'xl/worksheets/sheet1.xml')).toContain('<col min="9" max="9" width="9" customWidth="1"/><col min="10" max="11" width="9" customWidth="1"/></cols>');
+    expect(partText(saveXlsx(src, k), 'xl/worksheets/sheet1.xml')).toContain('<col min="9" max="9" width="9" customWidth="1"/><col min="10" max="11" width="9" customWidth="1"/><col min="15"');
     expectSame(replay(readXlsx(src), k), readXlsx(saveXlsx(src, k)));
     expectSame(replay(readXlsx(src), ops), readXlsx(saveXlsx(src, ops)));
   });
@@ -187,6 +187,22 @@ describe('열 너비·행 높이·병합 저장', () => {
     const cleared = [...ops, { kind: 'colWidth', sheet: 0, c1: 0, c2: 5, width: null } as Op];
     expect(partText(saveXlsx(src, cleared), 'xl/worksheets/sheet1.xml')).not.toContain('<cols');
     expectSame(replay(readXlsx(src), cleared), readXlsx(saveXlsx(src, cleared)));
+  });
+
+  it('모델이 모르는 <col> 속성(bestFit·outlineLevel)이 다르면 합치지 않고, 그 속성만 남은 구간은 지우지 않는다', () => {
+    const src = buildXlsx({ sheets: [{ name: 'S1', xml: '<cols><col min="1" max="2" width="10" bestFit="1"/><col min="3" max="3" width="8"/><col min="5" max="5" width="8" outlineLevel="1"/></cols><sheetData/>' }] });
+    const ops: Op[] = [
+      { kind: 'colWidth', sheet: 0, c1: 2, c2: 2, width: 10 },
+      { kind: 'insertCols', sheet: 0, at: 2, count: 1 },
+      { kind: 'colWidth', sheet: 0, c1: 5, c2: 5, width: null },
+    ];
+    const model = replay(readXlsx(src), ops);
+    expect(model.sheets[0].layout.colRuns).toEqual([
+      { c1: 0, c2: 1, info: { width: 10, extra: 'bestFit=1' } },
+      { c1: 3, c2: 3, info: { width: 10 } },
+      { c1: 5, c2: 5, info: { extra: 'outlineLevel=1' } },
+    ]);
+    expectSame(model, readXlsx(saveXlsx(src, ops)));
   });
 
   it('행 높이: 행이 없으면 정렬 위치에 만들고 null이면 ht·customHeight를 지운다', () => {
@@ -283,7 +299,7 @@ function randomOps(src: Uint8Array, seed: number, n: number): Op[] {
       const c1 = int(0, 8);
       op = { kind: 'style', sheet, rows, c1, c2: c1 + int(0, 3), patch: PATCHES[int(0, PATCHES.length - 1)] };
     } else if (k < 0.5) {
-      const c1 = int(0, 9);
+      const c1 = int(0, 17);
       op = { kind: 'colWidth', sheet, c1, c2: c1 + int(0, 2), width: rand() < 0.3 ? null : [9, 12, 20.5][int(0, 2)] };
     } else if (k < 0.58) {
       op = { kind: 'rowHeight', sheet, rows: [int(0, 12)], height: rand() < 0.3 ? null : [12, 30][int(0, 1)] };
@@ -314,6 +330,27 @@ describe('모델 replay와 저장 결과의 서식 동일성', () => {
     const model = replay(readXlsx(src), ops);
     const saved = readXlsx(saveXlsx(src, ops));
     expectSame(model, saved, 18, 14);
+  });
+});
+
+describe('서식 저장 성능·색 정규화', () => {
+  it('전체 행 12개(16,384열)에 서식을 저장해도 1초 안에 끝난다', () => {
+    const src = buildXlsx({ sheets: [{ name: 'S1', xml: '<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>' }] });
+    const op = style(Array.from({ length: 12 }, (_, i) => i), 0, 16383, { fill: { color: { rgb: 'FFFF00' } } });
+    const t0 = performance.now();
+    const out = saveXlsx(src, [op]);
+    expect(performance.now() - t0).toBeLessThan(1000);
+    expect(partText(out, 'xl/worksheets/sheet1.xml')).toContain('<c r="XFD12" s="1"/>');
+  });
+
+  it('소문자 rgb도 대문자로 저장해 다시 열고 같은 패치를 적용하면 새 항목이 없다', () => {
+    const src = SRC();
+    const op = style([0, 1], 0, 2, { font: { color: { rgb: 'abcdef' } }, fill: { color: { rgb: 'ffcc00' } }, border: { preset: 'all', color: { rgb: '0070c0' } } });
+    const out = saveXlsx(src, [op]);
+    expect(partText(out, 'xl/styles.xml')).toContain('rgb="FFABCDEF"');
+    expectSame(replay(readXlsx(src), [op]), readXlsx(out));
+    const again = saveXlsx(out, [op]);
+    expect(unzipSync(again)['xl/styles.xml']).toEqual(unzipSync(out)['xl/styles.xml']);
   });
 });
 

@@ -1,7 +1,7 @@
-import type { Op, SheetLayout, StyleTable } from '../core/types';
+import type { Op, StyleTable } from '../core/types';
 import { expandSharedFormulas, setCellInSheet } from './cells';
 import { readStyles } from './styles';
-import { applyStyleOp, flushStyles, layoutOfDoc } from './stylesWrite';
+import { applyStyleOp, flushStyles } from './stylesWrite';
 import { applyStructural } from './structure';
 import { dirOf, readText, relsPathOf, relTargets, sheetInfos, unzipParts, workbookPath, writeText, zipParts, type Parts, type SheetInfo } from './package';
 import { childElements, parseXml, serializeXml } from './xml';
@@ -16,7 +16,6 @@ export interface SaveContext {
   expandedSheets: Set<string>; // 공유 수식을 이미 푼 시트 경로
   getDoc(path: string): Document;
   readonly styles: StyleTable; // 원본 styles.xml로 처음 쓸 때 만든다. style Op가 화면 모델과 같은 순서로 새 항목을 더한다
-  layoutOf(sheet: number): SheetLayout; // 지금 시트 DOM의 열 구간·행 정보·병합
 }
 
 export function createSaveContext(original: Uint8Array): SaveContext {
@@ -41,9 +40,6 @@ export function createSaveContext(original: Uint8Array): SaveContext {
     },
     get styles() {
       return (styles ??= readStyles(parts));
-    },
-    layoutOf(sheet) {
-      return layoutOfDoc(sheetDoc(ctx, sheet));
     },
   };
   return ctx;

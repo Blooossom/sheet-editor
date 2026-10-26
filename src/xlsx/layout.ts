@@ -22,6 +22,15 @@ function attrsOf(tag: string): Record<string, string> {
   return out;
 }
 
+// <col>에서 모델이 해석하는 속성. 나머지(bestFit·outlineLevel·collapsed·phonetic 등)는 ColInfo.extra로 비교만 한다.
+const COL_MODEL_ATTRS = new Set(['min', 'max', 'width', 'customWidth', 'hidden', 'style']);
+
+/** 모델이 쓰지 않는 <col> 속성의 비교 키(이름순 "이름=값"). 없으면 undefined. 저장기(stylesWrite)와 공용. */
+export function colExtraKey(attrs: [string, string][]): string | undefined {
+  const rest = attrs.filter(([n]) => !COL_MODEL_ATTRS.has(n) && !n.startsWith('xmlns')).map(([n, v]) => `${n}=${v}`).sort();
+  return rest.length > 0 ? rest.join(' ') : undefined;
+}
+
 const isTrue = (v: string | undefined) => v === '1' || v === 'true';
 
 function num(v: string | undefined): number | undefined {
@@ -69,6 +78,8 @@ export function readLayout(sheetXml: string): SheetLayout {
       if (isTrue(a.hidden)) info.hidden = true;
       const style = num(a.style);
       if (style !== undefined) info.style = style;
+      const extra = colExtraKey(Object.entries(a));
+      if (extra !== undefined) info.extra = extra;
       runs.push({ c1: min - 1, c2: max - 1, info });
     }
     runs.sort((x, y) => x.c1 - y.c1);

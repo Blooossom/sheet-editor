@@ -1,7 +1,7 @@
 // 서식 번호 만들기. 화면 모델(applyOp)과 xlsx 저장기가 같은 StyleTable에 같은 순서로 호출하므로 결과 번호가 항상 같다.
 import { builtinFormatCode } from '../format/numfmt';
 import { effectiveXf } from '../grid/resolve';
-import type { Alignment, BorderDef, BorderSide, FillDef, FontDef, Op, SheetModel, StylePatch, StyleTable, Xf } from './types';
+import type { Alignment, BorderDef, BorderSide, ColorRef, FillDef, FontDef, Op, SheetModel, StylePatch, StyleTable, Xf } from './types';
 
 export type { StylePatch };
 export interface EdgePos { top: boolean; bottom: boolean; left: boolean; right: boolean }
@@ -91,6 +91,11 @@ export function internNumFmt(t: StyleTable, code: string): number {
   return id;
 }
 
+// readStyles는 rgb를 대문자로 읽으므로, 새 항목도 대문자로 만들어야 저장 후 다시 열었을 때 같은 정의가 된다
+function normColor(c: ColorRef): ColorRef {
+  return 'rgb' in c ? { rgb: c.rgb.toUpperCase() } : c;
+}
+
 const FONT_KEYS = ['name', 'size', 'bold', 'italic', 'underline', 'strike'] as const;
 
 function patchFont(base: FontDef, p: NonNullable<StylePatch['font']>): FontDef {
@@ -103,14 +108,14 @@ function patchFont(base: FontDef, p: NonNullable<StylePatch['font']>): FontDef {
   }
   if ('color' in p) {
     if (p.color == null) delete f.color;
-    else f.color = p.color;
+    else f.color = normColor(p.color);
   }
   return f as unknown as FontDef;
 }
 
 function patchBorder(base: BorderDef, p: NonNullable<StylePatch['border']>, pos: EdgePos): BorderDef {
   if (p.preset === 'none') return {};
-  const side: BorderSide = p.color ? { style: p.style ?? 'thin', color: p.color } : { style: p.style ?? 'thin' };
+  const side: BorderSide = p.color ? { style: p.style ?? 'thin', color: normColor(p.color) } : { style: p.style ?? 'thin' };
   if (p.preset === 'all') return { left: side, right: side, top: side, bottom: side };
   // outside: 범위 가장자리 변만 긋고 안쪽 변은 원래 값을 둔다
   const b: BorderDef = { ...base };
@@ -158,7 +163,7 @@ export function applyStylePatch(t: StyleTable, baseXf: number, patch: StylePatch
   if (patch.font) fontId = component(t.fonts, fontId, patchFont(t.fonts[fontId] ?? t.fonts[0], patch.font), (d) => internFont(t, d), 'applyFont');
   if (patch.fill !== undefined) {
     // Excel이 만드는 단색 채우기와 같은 모양(bgColor indexed=64)이어야 기존 항목을 재사용한다
-    const fill: FillDef = patch.fill === null ? { pattern: 'none' } : { pattern: 'solid', fg: patch.fill.color, bg: { indexed: 64 } };
+    const fill: FillDef = patch.fill === null ? { pattern: 'none' } : { pattern: 'solid', fg: normColor(patch.fill.color), bg: { indexed: 64 } };
     fillId = component(t.fills, fillId, fill, (d) => internFill(t, d), 'applyFill');
   }
   if (patch.border) borderId = component(t.borders, borderId, patchBorder(t.borders[borderId] ?? {}, patch.border, pos), (d) => internBorder(t, d), 'applyBorder');

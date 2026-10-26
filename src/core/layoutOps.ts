@@ -46,7 +46,7 @@ export function shiftLayout(layout: SheetLayout, axis: 'row' | 'col', at: number
   }
 }
 
-const sameInfo = (a: ColInfo, b: ColInfo) => a.width === b.width && a.hidden === b.hidden && a.style === b.style;
+const sameInfo = (a: ColInfo, b: ColInfo) => a.width === b.width && a.hidden === b.hidden && a.style === b.style && a.extra === b.extra;
 
 /** 열 c1..c2의 너비를 바꾼다(null = 너비 지움). 걸친 구간은 나누고, 정보가 빈 구간은 지우며, 대상 범위에 닿는 이웃 구간만 같은 정보면 합친다. */
 export function setColWidth(layout: SheetLayout, c1: number, c2: number, width: number | null): void {

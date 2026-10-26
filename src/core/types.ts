@@ -19,7 +19,7 @@ export interface SheetModel {
 }
 
 export interface CellRange { r1: number; c1: number; r2: number; c2: number } // 0부터, 포함
-export interface ColInfo { width?: number /* 파일의 width(문자 단위, 패딩 포함) */; hidden?: boolean; style?: number }
+export interface ColInfo { width?: number /* 파일의 width(문자 단위, 패딩 포함) */; hidden?: boolean; style?: number; extra?: string /* 모델이 쓰지 않는 <col> 속성(bestFit·outlineLevel 등)의 비교 키. 같은지만 본다 */ }
 export interface RowInfo { height?: number /* pt */; hidden?: boolean; style?: number /* customFormat="1"일 때만 */ }
 export interface SheetLayout {
   colRuns: { c1: number; c2: number; info: ColInfo }[]; // 0부터, c1 오름차순, 겹치지 않음

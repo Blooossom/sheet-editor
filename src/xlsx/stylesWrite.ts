@@ -4,7 +4,7 @@ import { parseA1, toA1 } from '../core/refs';
 import { applyStylePatch, styleCellsOf } from '../core/styleOps';
 import type { BorderDef, Cell, CellRange, ColInfo, ColorRef, FillDef, FontDef, Op, RowInfo, SheetLayout, SheetModel, StyleTable, Xf } from '../core/types';
 import { cellsWithIndex, makeEl, rowsWithIndex, sheetDataOf } from './cells';
-import { emptyLayout } from './layout';
+import { colExtraKey, emptyLayout } from './layout';
 import { dirOf, relsPathOf, relTargets, workbookPath, writeText } from './package';
 import { sheetDoc, type SaveContext } from './save';
 import { childElements, NS_MAIN, parseXml, serializeXml } from './xml';
@@ -93,18 +93,21 @@ function inSpans(spans: string | null, col1: number): boolean {
 
 class CellIndex {
   private cells: { el: Element; col: number }[];
+  private byCol = new Map<number, Element>();
   constructor(private doc: Document, private rowEl: Element, private row: number) {
     this.cells = cellsWithIndex(rowEl);
+    for (const c of this.cells) if (!this.byCol.has(c.col)) this.byCol.set(c.col, c.el);
   }
   getOrCreate(col: number): { el: Element; created: boolean } {
-    const hit = this.cells.find((c) => c.col === col);
-    if (hit) return { el: hit.el, created: false };
+    const hit = this.byCol.get(col);
+    if (hit) return { el: hit, created: false };
     const el = makeEl(this.doc, 'c');
     el.setAttribute('r', toA1(this.row, col));
     if (!inSpans(this.rowEl.getAttribute('spans'), col + 1)) this.rowEl.removeAttribute('spans'); // 틀린 힌트를 남기지 않는다
     const at = upperBound(this.cells, col, (c) => c.col);
     this.rowEl.insertBefore(el, this.cells[at]?.el ?? null);
     this.cells.splice(at, 0, { el, col });
+    this.byCol.set(col, el);
     return { el, created: true };
   }
 }
@@ -144,6 +147,8 @@ function infoOfAttrs(attrs: [string, string][]): ColInfo {
   if (isTrue(attrOf(attrs, 'hidden'))) info.hidden = true;
   const style = num(attrOf(attrs, 'style'));
   if (style !== undefined) info.style = style;
+  const extra = colExtraKey(attrs);
+  if (extra !== undefined) info.extra = extra;
   return info;
 }
 
@@ -192,7 +197,7 @@ function readMerges(container: Element | undefined): MergeEntry[] {
 }
 
 /** 시트 DOM의 열 구간·행 정보·병합(readLayout과 같은 규칙). 그 밖의 항목은 기본값이다. */
-export function layoutOfDoc(doc: Document): SheetLayout {
+function layoutOfDoc(doc: Document): SheetLayout {
   const L = emptyLayout();
   const root = doc.documentElement;
   L.colRuns = readColRuns(childElements(root, 'cols')[0]).runs.map((r) => ({ c1: r.c1, c2: r.c2, info: infoOfAttrs(r.attrs) }));
@@ -242,13 +247,11 @@ function writeStyle(t: StyleTable, doc: Document, op: Extract<Op, { kind: 'style
   }
 }
 
-const sameColInfo = (a: ColInfo, b: ColInfo) => a.width === b.width && a.hidden === b.hidden && a.style === b.style;
-const MODEL_ATTRS = new Set(['width', 'customWidth', 'hidden', 'style']);
-// 모델(layoutOps.setColWidth)이 합치는 조건 + 모델이 모르는 속성(bestFit·outlineLevel 등)도 같을 때
+// layoutOps.setColWidth의 sameInfo와 같다(모델이 모르는 속성은 ColInfo.extra로 비교)
 function sameRun(a: ColRun, b: ColRun): boolean {
-  if (!sameColInfo(infoOfAttrs(a.attrs), infoOfAttrs(b.attrs))) return false;
-  const rest = (r: ColRun) => JSON.stringify(r.attrs.filter(([n]) => !MODEL_ATTRS.has(n)).sort());
-  return rest(a) === rest(b);
+  const x = infoOfAttrs(a.attrs);
+  const y = infoOfAttrs(b.attrs);
+  return x.width === y.width && x.hidden === y.hidden && x.style === y.style && x.extra === y.extra;
 }
 
 function setAttr(attrs: [string, string][], name: string, value: string): void {
@@ -296,7 +299,7 @@ function writeColWidth(doc: Document, c1: number, c2: number, width: number | nu
 
   const out: ColRun[] = [];
   for (const p of pieces) {
-    if (p.attrs.length === 0) continue;
+    if (Object.keys(infoOfAttrs(p.attrs)).length === 0) continue; // 모델과 같이 정보 없는 구간(customWidth만 등)은 지운다
     const prev = out[out.length - 1];
     if (prev && prev.c2 + 1 === p.c1 && (touch(prev) || touch(p)) && sameRun(prev, p)) {
       if (!touch(prev)) prev.attrs = p.attrs; // 대상 구간의 속성(customWidth="1")을 남긴다

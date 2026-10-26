@@ -81,7 +81,7 @@ function fixture(): Uint8Array {
     sheets: [{
       name: 'S1',
       xml: `<sheetViews><sheetView workbookViewId="0"><pane xSplit="2" ySplit="3" topLeftCell="C4" activePane="bottomRight" state="frozen"/><selection pane="topRight" activeCell="C1" sqref="C1"/><selection pane="bottomLeft" activeCell="A4" sqref="A4"/><selection pane="bottomRight" activeCell="C4" sqref="C4"/></sheetView></sheetViews>
-<cols><col min="1" max="1" width="12" customWidth="1"/><col min="3" max="5" width="7" customWidth="1"/><col min="8" max="9" width="20" hidden="1" customWidth="1"/></cols>
+<cols><col min="1" max="1" width="12" customWidth="1"/><col min="3" max="5" width="7" customWidth="1"/><col min="8" max="9" width="20" hidden="1" customWidth="1"/><col min="10" max="10" width="7" bestFit="1" customWidth="1"/><col min="11" max="12" outlineLevel="1" collapsed="1"/></cols>
 <sheetData>${rows}</sheetData>
 <mergeCells count="5"><mergeCell ref="A1:C1"/><mergeCell ref="B5:C9"/><mergeCell ref="E12:H12"/><mergeCell ref="A20:A24"/><mergeCell ref="F2:G3"/></mergeCells>`,
     }],
