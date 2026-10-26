@@ -14,6 +14,22 @@ function grid3x3() {
   return makeWorkbook('xlsx', [{ name: 'S', grid: [[1, 2, 3], [4, 5, 6], [7, 8, 9]] }]);
 }
 
+describe('글꼴 이름 바꾸기', () => {
+  it('이름을 바꾸면 scheme·family·charset을 지워 테마 글꼴로 되돌아가지 않는다', () => {
+    const t = defaultStyleTable();
+    t.fonts[0] = { name: '맑은 고딕', size: 11, family: 2, charset: 129, scheme: 'minor', bold: true };
+    const x = applyStylePatch(t, 0, { font: { name: 'Arial' } }, ALL);
+    expect(t.fonts[t.xfs[x].fontId]).toEqual({ name: 'Arial', size: 11, bold: true });
+  });
+  it('이름이 같거나 다른 속성만 바꾸면 scheme·family·charset을 둔다', () => {
+    const t = defaultStyleTable();
+    t.fonts[0] = { name: '맑은 고딕', size: 11, family: 2, charset: 129, scheme: 'minor' };
+    expect(applyStylePatch(t, 0, { font: { name: '맑은 고딕' } }, ALL)).toBe(0);
+    const x = applyStylePatch(t, 0, { font: { size: 14 } }, ALL);
+    expect(t.fonts[t.xfs[x].fontId]).toEqual({ name: '맑은 고딕', size: 14, family: 2, charset: 129, scheme: 'minor' });
+  });
+});
+
 describe('intern', () => {
   it('같은 패치를 두 번 적용해도 fonts·xfs가 늘지 않는다', () => {
     const t = defaultStyleTable();

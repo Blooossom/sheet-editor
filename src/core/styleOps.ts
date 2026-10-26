@@ -100,6 +100,12 @@ const FONT_KEYS = ['name', 'size', 'bold', 'italic', 'underline', 'strike'] as c
 
 function patchFont(base: FontDef, p: NonNullable<StylePatch['font']>): FontDef {
   const f: Record<string, unknown> = { ...base };
+  // Excel처럼 이름을 바꾸면 scheme(테마 글꼴 연결)·family·charset을 지운다. 남기면 Excel이 테마 글꼴로 보여 줄 수 있다.
+  if (p.name !== undefined && p.name !== base.name) {
+    delete f.scheme;
+    delete f.family;
+    delete f.charset;
+  }
   for (const k of FONT_KEYS) {
     if (!(k in p)) continue;
     const v = p[k];
