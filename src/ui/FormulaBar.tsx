@@ -3,7 +3,8 @@ import { editText } from '../core/display';
 import { getCell } from '../core/ops';
 import { toA1 } from '../core/refs';
 import type { DocumentStore } from '../document/store';
-import { showError, type Selection } from './Grid';
+import { showError } from './Grid';
+import type { Selection } from './selectionTypes';
 
 interface Props {
   store: DocumentStore;

@@ -1,5 +1,5 @@
 import type { Op, StructuralKind } from '../core/types';
-import type { Selection } from './Grid';
+import type { Selection } from './selectionTypes';
 
 export type StructuralAction =
   | 'insertAbove'

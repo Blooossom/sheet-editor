@@ -181,3 +181,23 @@ describe('hidden edges and clamps', () => {
     expect(g.mergeAt(6, 0)).toBeNull()
   })
 })
+
+describe('SheetGeometry 선택용 접근자', () => {
+  it('origRowOf·isRowHidden·isColHidden', () => {
+    const g = new SheetGeometry(input({ rowCount: 3, rowView: [0, 2, 4], rowHeight: (r) => (r === 2 ? 0 : 20), colWidth: (c) => (c === 1 ? 0 : 50) }))
+    expect(g.origRowOf(1)).toBe(2)
+    expect(g.origRowOf(3)).toBeUndefined()
+    expect(g.isRowHidden(1)).toBe(true)
+    expect(g.isRowHidden(0)).toBe(false)
+    expect(g.isColHidden(1)).toBe(true)
+    expect(g.isColHidden(0)).toBe(false)
+  })
+
+  it('mergeBounds·allMergeBounds는 화면 좌표, 끊긴 병합은 제외', () => {
+    const merges = [{ r1: 1, c1: 0, r2: 2, c2: 1 }, { r1: 3, c1: 2, r2: 4, c2: 2 }]
+    const g = new SheetGeometry(input({ rowCount: 4, rowView: [0, 1, 2, 4], merges }))
+    expect(g.mergeBounds(2, 1)).toEqual({ r1: 1, c1: 0, r2: 2, c2: 1 })
+    expect(g.mergeBounds(3, 2)).toBeNull()
+    expect(g.allMergeBounds()).toEqual([{ r1: 1, c1: 0, r2: 2, c2: 1 }])
+  })
+})

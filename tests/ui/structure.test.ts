@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { argsToOps, shiftFilterCol, structuralArgs } from '../../src/ui/structure';
-import type { Selection } from '../../src/ui/Grid';
+import type { Selection } from '../../src/ui/selectionTypes';
 
 const sel = (p: Partial<Selection>): Selection => ({ sheet: 0, row: 4, col: 2, rows: [], cols: [], ...p });
 
