@@ -3,7 +3,7 @@ import { defaultStyleTable } from '../xlsx/styles';
 import { applyOp, cloneWorkbook, getCell, makeSetOp, replay, structuralBlockReason } from '../core/ops';
 import { displayText, editText } from '../core/display';
 import type { Cell, CellRange, Op, StructuralKind, StylePatch, WorkbookModel } from '../core/types';
-import { MAX_COL, MAX_ROW, parseA1 } from '../core/refs';
+import { parseA1 } from '../core/refs';
 import { maxDigitWidth, pxToColWidth, pxToPt } from '../grid/metrics';
 import { DEFAULT_DIALECT, csvToWorkbook, detectDialect, parseCsv, serializeCsv, workbookToCsvRows } from '../csv/csv';
 import type { CsvDialect } from '../csv/csv';
@@ -20,6 +20,8 @@ export type Source =
 
 const CSV_BLOCK = '이 형식(csv)은 서식을 저장할 수 없습니다.';
 const MAX_FORMAT_CELLS = 200000;
+const MAX_COL_CHARS = 255; // Excel 한계
+const MAX_ROW_PT = 409.5;
 const FORMAT_CAP_MESSAGE = '한 번에 서식을 바꿀 수 있는 칸은 200,000개까지입니다.';
 
 function formatOf(path: string): 'xlsx' | 'csv' {
@@ -244,18 +246,18 @@ export class DocumentStore {
   /**
    * 서식 적용. 차단 이유 또는 null.
    * - rows는 원래 행 번호. 필터면 보이는 행만 넘어오므로 그 행에만 적용한다.
-   * - 전체 열 선택(rows가 마지막 행까지)은 rowCount로, 전체 행 선택(c1=0, c2가 마지막 열)은 colCount로 줄인다.
+   * - rows·c2가 'all'이면 사용 범위(rowCount·colCount)까지만. 빈 결과면 단계를 만들지 않는다.
    * - 병합 일부를 덮으면 열은 c1·c2를 넓힌다. 행은 rows가 연속일 때(필터 없음)만 병합 행까지 더한다. 필터 중에는 안 보이는 행을 건드리지 않는다.
    */
-  formatCells(sheet: number, sel: { rows: number[]; c1: number; c2: number }, patch: StylePatch): string | null {
+  formatCells(sheet: number, sel: { rows: number[] | 'all'; c1: number; c2: number | 'all' }, patch: StylePatch): string | null {
     this.assertIdle();
     if (this.wb.kind === 'csv') return CSV_BLOCK;
+    if (Object.keys(patch).length === 0) return null;
     const sh = this.wb.sheets[sheet];
-    let rows = [...new Set(sel.rows)].sort((a, b) => a - b);
+    // 'all'은 사용 범위(rowCount·colCount)로 줄인다. 필터 중에는 UI가 보이는 원래 행 번호 배열을 넘긴다.
+    let rows = sel.rows === 'all' ? Array.from({ length: sh.rowCount }, (_, i) => i) : [...new Set(sel.rows)].sort((a, b) => a - b);
     let c1 = sel.c1;
-    let c2 = sel.c2;
-    if (rows.length > 0 && rows[rows.length - 1] >= MAX_ROW - 1) rows = rows.filter((r) => r < sh.rowCount);
-    if (c1 === 0 && c2 >= MAX_COL - 1) c2 = sh.colCount - 1;
+    let c2 = sel.c2 === 'all' ? sh.colCount - 1 : sel.c2;
     if (rows.length === 0 || c2 < c1) return null;
 
     const contiguous = rows[rows.length - 1] - rows[0] + 1 === rows.length;
@@ -285,10 +287,14 @@ export class DocumentStore {
   setColWidth(sheet: number, cols: number[], width: number | null): string | null {
     this.assertIdle();
     if (this.wb.kind === 'csv') return CSV_BLOCK;
-    if (width !== null && !(width > 0)) return '올바른 크기가 아닙니다.';
+    if (width !== null && !(Number.isFinite(width) && width > 0)) return '올바른 크기가 아닙니다.';
     const groups = runs(cols);
     if (groups.length === 0) return null;
-    const chars = width === null ? null : pxToColWidth(width, maxDigitWidth(this.wb.styles.fonts[0]));
+    let chars: number | null = null;
+    if (width !== null) {
+      const mdw = maxDigitWidth(this.wb.styles.fonts[0]);
+      chars = Math.min(pxToColWidth(width, mdw), MAX_COL_CHARS);
+    }
     this.commit(groups.map((g) => ({ kind: 'colWidth', sheet, c1: g.start, c2: g.start + g.count - 1, width: chars })));
     return null;
   }
@@ -297,10 +303,10 @@ export class DocumentStore {
   setRowHeight(sheet: number, rows: number[], height: number | null): string | null {
     this.assertIdle();
     if (this.wb.kind === 'csv') return CSV_BLOCK;
-    if (height !== null && !(height > 0)) return '올바른 크기가 아닙니다.';
+    if (height !== null && !(Number.isFinite(height) && height > 0)) return '올바른 크기가 아닙니다.';
     const sorted = [...new Set(rows)].sort((a, b) => a - b);
     if (sorted.length === 0) return null;
-    this.commit([{ kind: 'rowHeight', sheet, rows: sorted, height: height === null ? null : pxToPt(height) }]);
+    this.commit([{ kind: 'rowHeight', sheet, rows: sorted, height: height === null ? null : Math.min(pxToPt(height), MAX_ROW_PT) }]);
     return null;
   }
 
@@ -322,17 +328,16 @@ export class DocumentStore {
     return t;
   }
 
-  /** rows: 화면에 보이는 원래 행 번호(생략하면 range의 모든 행). range 행을 빠짐없이 덮지 않으면 필터 중으로 본다. */
-  mergeCheck(sheet: number, range: CellRange, rows?: number[]): { ok: true; lossy: boolean } | { ok: false; reason: string } {
+  /** rows: 화면에 보이는 원래 행 번호. 'all' = 필터 없음. 넓힌 대상의 행을 빠짐없이 덮지 않으면 필터 중으로 본다. */
+  mergeCheck(sheet: number, range: CellRange, rows: number[] | 'all'): { ok: true; lossy: boolean } | { ok: false; reason: string } {
     if (this.wb.kind === 'csv') return { ok: false, reason: CSV_BLOCK };
-    if (rows) {
-      const n = new Set(rows).size;
-      if (n !== range.r2 - range.r1 + 1 || Math.min(...rows) !== range.r1 || Math.max(...rows) !== range.r2) {
-        return { ok: false, reason: '필터를 해제한 뒤 병합하세요.' };
-      }
-    }
     const sh = this.wb.sheets[sheet];
     const t = this.mergeTarget(sheet, range);
+    if (rows !== 'all') {
+      const seen = new Set<number>();
+      for (const r of rows) if (r >= t.r1 && r <= t.r2) seen.add(r);
+      if (seen.size !== t.r2 - t.r1 + 1) return { ok: false, reason: '필터를 해제한 뒤 병합하세요.' };
+    }
     for (const table of sh.tables) {
       const [a, b] = table.ref.split(':');
       const s = parseA1(a);
@@ -357,20 +362,20 @@ export class DocumentStore {
     return out.sort((a, b) => a.row - b.row || a.col - b.col);
   }
 
-  merge(sheet: number, range: CellRange, rows?: number[]): string | null {
+  merge(sheet: number, range: CellRange, rows: number[] | 'all'): string | null {
     this.assertIdle();
     const check = this.mergeCheck(sheet, range, rows);
     if (!check.ok) return check.reason;
     const t = this.mergeTarget(sheet, range);
     if (t.r1 === t.r2 && t.c1 === t.c2) return null;
     if (this.wb.sheets[sheet].layout.merges.some((m) => m.r1 === t.r1 && m.c1 === t.c1 && m.r2 === t.r2 && m.c2 === t.c2)) return null;
-    // 값은 지우되 서식은 남긴다(칸 항목을 없애면 행·열 서식으로 바뀌어 보인다)
+    // 값은 지우되 서식은 남긴다. 칸 항목을 없애면 행·열 서식으로 바뀌어 보이므로(R1) styleId 0도 명시한다.
     const ops: Op[] = this.nonAnchorCells(sheet, t).map(({ row, col, cell }) => ({
       kind: 'set',
       sheet,
       row,
       col,
-      cell: cell.styleId === undefined ? null : { value: null, styleId: cell.styleId, edited: true },
+      cell: { value: null, styleId: cell.styleId ?? 0, edited: true },
     }));
     ops.push({ kind: 'merge', sheet, range: t });
     this.commit(ops, true);
