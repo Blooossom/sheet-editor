@@ -1,6 +1,6 @@
 import { parseA1, shiftFormula, shiftRange } from './refs';
 import type { Axis } from './refs';
-import type { Cell, Op, SheetModel, WorkbookModel } from './types';
+import type { Cell, Op, SheetModel, StyleTable, WorkbookModel } from './types';
 
 interface ParseCtx {
   kind: 'xlsx' | 'csv';
@@ -174,11 +174,26 @@ export function structuralBlockReason(wb: WorkbookModel, op: Op): string | null 
   return null;
 }
 
+// 배열·Map은 복사하고 안의 객체는 얕게만 복사한다(서식 항목은 읽은 뒤 고정 취급)
+function cloneStyles(t: StyleTable): StyleTable {
+  return {
+    numFmts: new Map(t.numFmts),
+    fonts: t.fonts.map((f) => ({ ...f })),
+    fills: t.fills.map((f) => ({ ...f })),
+    borders: t.borders.map((b) => ({ ...b })),
+    xfs: t.xfs.map((x) => ({ ...x })),
+    themeColors: [...t.themeColors],
+    ...(t.indexedColors ? { indexedColors: [...t.indexedColors] } : {}),
+    baseCounts: { ...t.baseCounts },
+  };
+}
+
 export function cloneWorkbook(wb: WorkbookModel): WorkbookModel {
   return {
     kind: wb.kind,
     date1904: wb.date1904,
     dateStyleIds: new Set(wb.dateStyleIds),
+    styles: cloneStyles(wb.styles),
     sheets: wb.sheets.map((s) => ({
       name: s.name,
       rowCount: s.rowCount,

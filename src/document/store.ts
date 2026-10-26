@@ -1,3 +1,4 @@
+import { defaultStyleTable } from '../xlsx/styles';
 import { applyOp, cloneWorkbook, getCell, makeSetOp, replay, structuralBlockReason } from '../core/ops';
 import { displayText, editText } from '../core/display';
 import type { Op, StructuralKind, WorkbookModel } from '../core/types';
@@ -43,6 +44,7 @@ function emptyWorkbook(): WorkbookModel {
     sheets: [{ name: 'Sheet1', cells: new Map(), rowCount: 0, colCount: 0, blockers: [], tables: [] }],
     dateStyleIds: new Set(),
     date1904: false,
+    styles: defaultStyleTable(),
   };
 }
 
@@ -63,6 +65,7 @@ function toCsvModel(wb: WorkbookModel): WorkbookModel {
   const out = cloneWorkbook(wb);
   out.kind = 'csv';
   out.dateStyleIds = new Set();
+  out.styles = defaultStyleTable();
   for (const [si, sheet] of out.sheets.entries()) {
     for (const [r, cols] of [...sheet.cells]) {
       for (const c of [...cols.keys()]) {

@@ -1,3 +1,4 @@
+import { defaultStyleTable } from '../../src/xlsx/styles';
 import type { Cell, CellValue, SheetModel, WorkbookModel } from '../../src/core/types';
 
 type GridEntry = string | number | null | { f: string; v?: CellValue };
@@ -10,6 +11,7 @@ export function makeWorkbook(
     kind,
     dateStyleIds: new Set<number>(),
     date1904: false,
+    styles: defaultStyleTable(),
     sheets: sheets.map(({ name, grid }): SheetModel => {
       const cells = new Map<number, Map<number, Cell>>();
       let rowCount = 0;

@@ -23,11 +23,40 @@ export interface TableInfo {
   totalsRows: number; // totalsRowCount (기본 0)
 }
 
+export type ColorRef = { rgb: string } | { theme: number; tint?: number } | { indexed: number } | { auto: true };
+export interface FontDef { name: string; size: number; bold?: boolean; italic?: boolean; underline?: 'single' | 'double'; strike?: boolean; color?: ColorRef; family?: number; charset?: number; scheme?: string }
+export interface FillDef { pattern: string; /* 'none' | 'solid' | 'gray125' | … */ fg?: ColorRef; bg?: ColorRef }
+export type BorderStyle = 'thin' | 'medium' | 'thick' | 'dashed' | 'dotted' | 'double' | 'hair' | 'mediumDashed' | 'dashDot' | 'mediumDashDot' | 'dashDotDot' | 'mediumDashDotDot' | 'slantDashDot';
+export interface BorderSide { style: BorderStyle; color?: ColorRef }
+export interface BorderDef { left?: BorderSide; right?: BorderSide; top?: BorderSide; bottom?: BorderSide }
+export interface Alignment { horizontal?: string; vertical?: string; wrapText?: boolean; indent?: number; textRotation?: number; shrinkToFit?: boolean }
+export interface Xf {
+  numFmtId: number;
+  fontId: number;
+  fillId: number;
+  borderId: number;
+  xfId?: number;
+  alignment?: Alignment;
+  protection?: string; // 원문 보존용
+  applyFlags?: Record<string, string>; // applyFont 등 원문 속성
+}
+export interface StyleTable {
+  numFmts: Map<number, string>; // 사용자 정의 형식(id ≥ 164)
+  fonts: FontDef[];
+  fills: FillDef[];
+  borders: BorderDef[];
+  xfs: Xf[]; // cellXfs
+  themeColors: string[]; // 'RRGGBB' 12개. Excel theme 번호 순서(0=lt1, 1=dk1, 2=lt2, 3=dk2, 4…=accent1…)
+  indexedColors?: string[]; // <colors><indexedColors> 사용자 정의가 있을 때
+  baseCounts: { numFmts: number; fonts: number; fills: number; borders: number; xfs: number }; // 읽었을 때의 개수(새 항목 판별)
+}
+
 export interface WorkbookModel {
   kind: 'xlsx' | 'csv';
   sheets: SheetModel[];
   dateStyleIds: Set<number>; // 날짜 서식인 styleId
   date1904: boolean;
+  styles: StyleTable; // csv·새 문서는 defaultStyleTable()
 }
 
 export type StructuralKind = 'insertRows' | 'deleteRows' | 'insertCols' | 'deleteCols';

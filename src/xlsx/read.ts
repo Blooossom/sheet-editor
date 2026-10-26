@@ -2,6 +2,7 @@ import { parseA1, translateFormula } from '../core/refs';
 import type { Cell, CellValue, SheetModel, WorkbookModel } from '../core/types';
 import { findBlockers, findTables } from './blockers';
 import { readText, sheetInfos, unzipParts, type Parts } from './package';
+import { dateStyleIdsOf, readStyles } from './styles';
 import { childElements, descendants, parseXml } from './xml';
 
 // OOXML ST_Xstring: _xHHHH_ 는 그 문자, _x005F_ 는 밑줄 자체 (저장 쪽 escapeXstring의 역)
@@ -24,32 +25,6 @@ function readSharedStrings(parts: Parts): string[] {
   const text = readText(parts, 'xl/sharedStrings.xml');
   if (text === undefined) return [];
   return childElements(parseXml(text).documentElement, 'si').map(richText);
-}
-
-function isDateFormatCode(code: string): boolean {
-  return /[ydhs]/i.test(code.replace(/"[^"]*"/g, '').replace(/\[[^\]]*\]/g, ''));
-}
-
-// 내장 날짜·시간 서식 (한국어 로캘용 27–36, 50–58 포함)
-function isBuiltinDateId(id: number): boolean {
-  return (id >= 14 && id <= 22) || (id >= 27 && id <= 36) || (id >= 45 && id <= 47) || (id >= 50 && id <= 58);
-}
-
-function readDateStyleIds(parts: Parts): Set<number> {
-  const ids = new Set<number>();
-  const text = readText(parts, 'xl/styles.xml');
-  if (text === undefined) return ids;
-  const root = parseXml(text).documentElement;
-  const custom = new Map<number, string>();
-  for (const nf of childElements(childElements(root, 'numFmts')[0] ?? root, 'numFmt')) custom.set(Number(nf.getAttribute('numFmtId')), nf.getAttribute('formatCode') ?? '');
-  const cellXfs = childElements(root, 'cellXfs')[0];
-  if (!cellXfs) return ids;
-  childElements(cellXfs, 'xf').forEach((xf, i) => {
-    const id = Number(xf.getAttribute('numFmtId') ?? 0);
-    const code = custom.get(id);
-    if (isBuiltinDateId(id) || (code !== undefined && isDateFormatCode(code))) ids.add(i);
-  });
-  return ids;
 }
 
 function readSheetCells(xml: string, sst: string[]): Pick<SheetModel, 'cells' | 'rowCount' | 'colCount'> {
@@ -142,5 +117,6 @@ export function readXlsx(bytes: Uint8Array): WorkbookModel {
     };
   });
   if (sheets.length === 0) throw new Error('편집할 수 있는 워크시트가 없습니다.'); // 차트 시트만 있는 파일
-  return { kind: 'xlsx', sheets, dateStyleIds: readDateStyleIds(parts), date1904 };
+  const styles = readStyles(parts);
+  return { kind: 'xlsx', sheets, dateStyleIds: dateStyleIdsOf(styles), date1904, styles };
 }
