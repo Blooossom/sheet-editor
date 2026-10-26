@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyOp, getCell, replay } from '../../src/core/ops';
+import { applyOp, cloneWorkbook, getCell, replay } from '../../src/core/ops';
 import { applyStylePatch, internFill, internFont, internNumFmt, internXf, styleCellsOf } from '../../src/core/styleOps';
 import type { Op, StyleTable } from '../../src/core/types';
 import { unzipParts } from '../../src/xlsx/package';
@@ -59,7 +59,7 @@ describe('intern', () => {
   it('채우기 null은 채우기 없음(fill 0)', () => {
     const t = defaultStyleTable();
     const y = applyStylePatch(t, 0, { fill: { color: { theme: 4 } } }, ALL);
-    expect(t.fills[t.xfs[y].fillId]).toEqual({ pattern: 'solid', fg: { theme: 4 } });
+    expect(t.fills[t.xfs[y].fillId]).toEqual({ pattern: 'solid', fg: { theme: 4 }, bg: { indexed: 64 } });
     expect(applyStylePatch(t, y, { fill: null }, ALL)).toBe(0);
   });
 });
@@ -183,7 +183,7 @@ describe('손실 읽기 항목은 재사용하지 않는다', () => {
 
   it('readStyles가 표현하지 못한 속성이 있는 항목을 표시한다', () => {
     const t = read();
-    expect(t.lossy).toEqual({ fonts: new Set([1, 2]), fills: new Set([2]), borders: new Set([1]), xfs: new Set([1]) });
+    expect(t.lossy).toEqual({ fonts: new Set([1, 2]), fills: new Set([2]), borders: new Set([1]), xfs: new Set() });
   });
   it('정규화 결과가 같아도 손실 항목에 합치지 않고 끝에 추가한다', () => {
     const t = read();
@@ -202,10 +202,70 @@ describe('손실 읽기 항목은 재사용하지 않는다', () => {
     expect(t.fonts).toHaveLength(3);
     expect(t.fills).toHaveLength(3);
     expect(t.borders).toHaveLength(2);
-    // 손실 xf(quotePrefix)는 재사용하지 않는다
+    // quotePrefix는 비교에 들어가므로 접두사 없는 xf가 xf 1에 합쳐지지 않는다
     const text = applyStylePatch(t, 0, { numFmt: '@' }, ALL);
     expect(text).toBe(t.xfs.length - 1);
     expect(text).not.toBe(1);
+  });
+  it('quotePrefix 등 xf 원문 속성을 새 xf가 이어받는다', () => {
+    const t = read();
+    expect(t.xfs[1].attrs).toEqual({ quotePrefix: '1' });
+    const x = applyStylePatch(t, 1, { font: { bold: true } }, ALL);
+    expect(t.xfs[x]).toMatchObject({ numFmtId: 49, attrs: { quotePrefix: '1' }, applyFlags: { applyFont: '1' } });
+    expect(applyStylePatch(t, x, { font: { bold: false } }, ALL)).toBe(1);
+  });
+  it('따로 읽은 두 StyleTable에 같은 패치를 같은 순서로 적용하면 번호가 같다', () => {
+    const patches = [
+      { font: { underline: 'single' as const } },
+      { fill: { color: { theme: 4 } } },
+      { border: { preset: 'outside' as const, style: 'thick' as const } },
+      { numFmt: '#,##0"원"' },
+      { align: { horizontal: 'right' } },
+    ];
+    const run = () => {
+      const t = read();
+      const ids: number[] = [];
+      let x = 0;
+      for (const p of patches) ids.push((x = applyStylePatch(t, x, p, ALL)));
+      ids.push(applyStylePatch(t, 1, { font: { bold: true } }, ALL));
+      return { ids, t };
+    };
+    const a = run();
+    const b = run();
+    expect(a.ids).toEqual(b.ids);
+    expect(a.t).toEqual(b.t);
+  });
+});
+
+describe('밑줄 val="none"', () => {
+  const STYLES = `<styleSheet xmlns="${NS}"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><u val="none"/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>`;
+  it('밑줄 없음으로 읽고, 굵게를 적용해도 밑줄이 생기지 않는다', () => {
+    const t = readStyles(unzipParts(buildXlsx({ sheets: [{ name: 'S', xml: '<sheetData/>' }], styles: STYLES })));
+    expect(t.fonts[1]).toEqual({ name: 'Calibri', size: 11 });
+    expect(t.lossy).toBeUndefined();
+    const x = applyStylePatch(t, 1, { font: { bold: true } }, ALL);
+    expect(t.fonts[t.xfs[x].fontId]).toEqual({ name: 'Calibri', size: 11, bold: true });
+  });
+});
+
+describe('Excel 단색 채우기 재사용', () => {
+  it('fg + bgColor indexed=64 단색 채우기를 재사용한다', () => {
+    const t = defaultStyleTable();
+    t.fills.push({ pattern: 'solid', fg: { rgb: 'FFFF00' }, bg: { indexed: 64 } });
+    const x = applyStylePatch(t, 0, { fill: { color: { rgb: 'FFFF00' } } }, ALL);
+    expect(t.xfs[x].fillId).toBe(2);
+    expect(t.fills).toHaveLength(3);
+  });
+});
+
+describe('cloneWorkbook', () => {
+  it('lossy 표시를 따로 복사한다', () => {
+    const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [[1]] }]);
+    wb.styles.lossy = { fonts: new Set([0]), fills: new Set(), borders: new Set(), xfs: new Set() };
+    const copy = cloneWorkbook(wb);
+    expect(copy.styles.lossy).toEqual(wb.styles.lossy);
+    copy.styles.lossy!.fonts.add(5);
+    expect(wb.styles.lossy.fonts.has(5)).toBe(false);
   });
 });
 

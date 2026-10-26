@@ -68,7 +68,8 @@ function readFont(el: Element): FontDef {
   if (flag(childElements(el, 'b')[0])) font.bold = true;
   if (flag(childElements(el, 'i')[0])) font.italic = true;
   const u = childElements(el, 'u')[0];
-  if (u && flag(u) !== false) font.underline = u.getAttribute('val')?.startsWith('double') ? 'double' : 'single';
+  const uVal = u?.getAttribute('val');
+  if (u && flag(u) !== false && uVal !== 'none') font.underline = uVal?.startsWith('double') ? 'double' : 'single';
   if (flag(childElements(el, 'strike')[0])) font.strike = true;
   const color = readColor(childElements(el, 'color')[0]);
   if (color) font.color = color;
@@ -127,6 +128,8 @@ function readAlignment(el: Element): Alignment {
   return a;
 }
 
+const XF_ATTRS = new Set(['numFmtId', 'fontId', 'fillId', 'borderId', 'xfId']);
+
 function readXf(el: Element): Xf {
   const xf: Xf = {
     numFmtId: Number(el.getAttribute('numFmtId') ?? 0),
@@ -141,11 +144,14 @@ function readXf(el: Element): Xf {
   const pr = childElements(el, 'protection')[0];
   if (pr) xf.protection = `<protection${Array.from({ length: pr.attributes.length }, (_, i) => ` ${pr.attributes[i].name}="${pr.attributes[i].value}"`).join('')}/>`;
   const flags: Record<string, string> = {};
+  const attrs: Record<string, string> = {};
   for (let i = 0; i < el.attributes.length; i++) {
     const a = el.attributes[i];
     if (/^apply/.test(a.name)) flags[a.name] = a.value;
+    else if (!XF_ATTRS.has(a.name) && !a.name.startsWith('xmlns')) attrs[a.name] = a.value;
   }
   if (Object.keys(flags).length) xf.applyFlags = flags;
+  if (Object.keys(attrs).length) xf.attrs = attrs;
   return xf;
 }
 
@@ -165,8 +171,8 @@ function fontLossy(el: Element): boolean {
   return childElements(el).some((c) => {
     const n = c.localName;
     if (n === 'u') {
-      const v = c.getAttribute('val'); // 회계용 밑줄, val="none"(readFont는 밑줄로 읽는다)
-      return v !== null && v !== 'single' && v !== 'double' && v !== '0' && v !== 'false';
+      const v = c.getAttribute('val'); // 회계용 밑줄
+      return v !== null && v !== 'single' && v !== 'double' && v !== 'none' && v !== '0' && v !== 'false';
     }
     if (n === 'color') return colorLossy(c);
     if (n === 'vertAlign') return (c.getAttribute('val') ?? 'baseline') !== 'baseline';
@@ -194,10 +200,9 @@ function borderLossy(el: Element): boolean {
   });
 }
 
-const XF_ATTRS = new Set(['numFmtId', 'fontId', 'fillId', 'borderId', 'xfId']);
 const ALIGN_ATTRS = new Set(['horizontal', 'vertical', 'wrapText', 'indent', 'textRotation', 'shrinkToFit']);
+// xf 자체의 속성은 attrs로 모두 보존하므로 자식 요소만 본다
 function xfLossy(el: Element): boolean {
-  if (attrNames(el).some((n) => !XF_ATTRS.has(n) && !/^apply/.test(n) && isTrueAttr(el.getAttribute(n)))) return true;
   return childElements(el).some((c) => {
     if (c.localName === 'protection') return false;
     if (c.localName !== 'alignment') return true;

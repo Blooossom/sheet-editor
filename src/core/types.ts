@@ -54,6 +54,7 @@ export interface Xf {
   alignment?: Alignment;
   protection?: string; // 원문 보존용
   applyFlags?: Record<string, string>; // applyFont 등 원문 속성
+  attrs?: Record<string, string>; // 그 밖의 원문 속성(quotePrefix·pivotButton 등). 비교에 포함하고 새 xf가 이어받는다
 }
 export interface StyleTable {
   numFmts: Map<number, string>; // 사용자 정의 형식(id ≥ 164)

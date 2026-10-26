@@ -32,9 +32,14 @@ function keyOf(v: object): string {
   return k;
 }
 
+const xfKeyCache = new WeakMap<Xf, string>();
 function xfKey(xf: Xf): string {
-  const { applyFlags: _ignored, ...rest } = xf;
-  return JSON.stringify(normalize(rest));
+  let k = xfKeyCache.get(xf);
+  if (k === undefined) {
+    const { applyFlags: _ignored, ...rest } = xf;
+    xfKeyCache.set(xf, (k = JSON.stringify(normalize(rest))));
+  }
+  return k;
 }
 
 function intern<T extends object>(list: T[], lossy: Set<number> | undefined, def: T, key: (x: T) => string): number {
@@ -152,7 +157,8 @@ export function applyStylePatch(t: StyleTable, baseXf: number, patch: StylePatch
   let { fontId, fillId, borderId, numFmtId } = base;
   if (patch.font) fontId = component(t.fonts, fontId, patchFont(t.fonts[fontId] ?? t.fonts[0], patch.font), (d) => internFont(t, d), 'applyFont');
   if (patch.fill !== undefined) {
-    const fill: FillDef = patch.fill === null ? { pattern: 'none' } : { pattern: 'solid', fg: patch.fill.color };
+    // Excel이 만드는 단색 채우기와 같은 모양(bgColor indexed=64)이어야 기존 항목을 재사용한다
+    const fill: FillDef = patch.fill === null ? { pattern: 'none' } : { pattern: 'solid', fg: patch.fill.color, bg: { indexed: 64 } };
     fillId = component(t.fills, fillId, fill, (d) => internFill(t, d), 'applyFill');
   }
   if (patch.border) borderId = component(t.borders, borderId, patchBorder(t.borders[borderId] ?? {}, patch.border, pos), (d) => internBorder(t, d), 'applyBorder');
@@ -180,6 +186,7 @@ export function applyStylePatch(t: StyleTable, baseXf: number, patch: StylePatch
   if (base.xfId !== undefined) xf.xfId = base.xfId;
   if (alignment) xf.alignment = alignment;
   if (base.protection !== undefined) xf.protection = base.protection;
+  if (base.attrs !== undefined) xf.attrs = { ...base.attrs };
   if (Object.keys(flags).length > 0) xf.applyFlags = flags;
   return internXf(t, xf);
 }
