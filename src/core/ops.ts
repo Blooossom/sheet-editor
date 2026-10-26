@@ -2,6 +2,7 @@ import { isDateXf } from '../xlsx/styles';
 import { addMerge, removeMerges, setColWidth, setRowHeight, shiftLayout } from './layoutOps';
 import { parseA1, shiftFormula, shiftRange } from './refs';
 import { applyStylePatch, styleCellsOf } from './styleOps';
+import { effectiveXf } from '../grid/resolve';
 import type { Axis } from './refs';
 import type { Cell, Op, SheetModel, StyleTable, WorkbookModel } from './types';
 
@@ -60,7 +61,12 @@ export function getCell(sheet: SheetModel, row: number, col: number): Cell | und
 }
 
 export function makeSetOp(wb: WorkbookModel, sheet: number, row: number, col: number, input: string): Op {
-  const prev = getCell(wb.sheets[sheet], row, col);
+  let prev = getCell(wb.sheets[sheet], row, col);
+  // 칸이 없으면 행·열 서식을 물려받는다(R1, Excel과 같음). 빈 입력은 칸을 만들지 않는다.
+  if (!prev && input !== '' && wb.kind === 'xlsx') {
+    const xf = effectiveXf(wb.sheets[sheet], row, col);
+    if (xf !== 0) prev = { value: null, styleId: xf };
+  }
   const isDate = prev?.styleId !== undefined && wb.dateStyleIds.has(prev.styleId);
   const cell = parseInput(input, { kind: wb.kind, prev, isDate, date1904: wb.date1904 });
   return { kind: 'set', sheet, row, col, cell };
