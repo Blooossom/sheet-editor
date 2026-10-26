@@ -5,7 +5,7 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { message, open, save } from '@tauri-apps/plugin-dialog';
 import type { Op, StylePatch } from '../core/types';
-import { buildRowView, distinctValues } from '../core/view';
+import { buildRowView, distinctValues, keepRows, viewNeedsUpdate } from '../core/view';
 import { DocumentStore } from '../document/store';
 import { tauriIo } from '../document/io';
 import { CanvasGrid, type CanvasGridHandle, type ResizeEvent } from './canvas/CanvasGrid';
@@ -307,7 +307,7 @@ export function App() {
   const updateView = useCallback(
     (patch: Partial<Omit<ViewState, 'rows'>>) => {
       const next = { ...viewRef.current, ...patch };
-      setView({ ...next, rows: computeRows(store, currentRef.current, next) });
+      setView({ ...next, rows: keepRows(viewRef.current.rows, computeRows(store, currentRef.current, next)) });
     },
     [store],
   );
@@ -483,7 +483,7 @@ export function App() {
 
   const afterHistory = useRef<(ops: Op[] | null, undo: boolean) => void>(() => {});
   afterHistory.current = (ops, undo) => {
-    if (!ops?.some((o) => o.kind !== 'set')) return; // 편집만 바뀐 경우 보이는 행은 그대로 둔다
+    if (!ops || !viewNeedsUpdate(ops)) return; // 편집·서식만 바뀐 경우 보이는 행은 그대로 둔다
     updateView(filterPatch(ops, undo));
   };
 

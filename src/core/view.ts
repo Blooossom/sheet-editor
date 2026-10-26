@@ -1,5 +1,5 @@
 import { displayText } from './display';
-import type { SheetModel, WorkbookModel } from './types';
+import type { Op, SheetModel, WorkbookModel } from './types';
 
 export interface ColumnFilter {
   col: number;
@@ -53,4 +53,18 @@ export function distinctValues(
     .map(([value, count]) => ({ value, count }))
     .sort((a, b) => b.count - a.count || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0))
     .slice(0, limit);
+}
+
+const STRUCTURAL = new Set<Op['kind']>(['insertRows', 'deleteRows', 'insertCols', 'deleteCols']);
+
+/** 되돌리기·다시 하기 뒤 보이는 행을 다시 계산해야 하는지. 편집·서식·크기·병합은 보이는 행을 바꾸지 않는다. */
+export function viewNeedsUpdate(ops: Op[] | null): boolean {
+  return !!ops?.some((o) => STRUCTURAL.has(o.kind));
+}
+
+/** 다시 계산한 보이는 행이 이전과 같으면 이전 배열을 돌려준다(배열이 바뀌면 표가 선택을 처음 칸으로 돌린다). */
+export function keepRows(prev: number[] | null, next: number[] | null): number[] | null {
+  if (prev === null || next === null || prev.length !== next.length) return next;
+  for (let i = 0; i < prev.length; i++) if (prev[i] !== next[i]) return next;
+  return prev;
 }
