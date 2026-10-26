@@ -34,6 +34,40 @@ describe('readLayout', () => {
     expect(L.showGridLines).toBe(true);
   });
 
+  it('네임스페이스 접두사가 붙은 요소도 읽는다', () => {
+    const L = readLayout(`<x:worksheet xmlns:x="${NS_MAIN}"><x:sheetViews><x:sheetView showGridLines="0"><x:pane xSplit="2" ySplit="3" state="frozen"/></x:sheetView></x:sheetViews><x:sheetFormatPr defaultRowHeight="18"/><x:cols><x:col min="1" max="2" width="7"/></x:cols><x:sheetData><x:row r="2" ht="30"/></x:sheetData><x:mergeCells><x:mergeCell ref="A1:B2"/></x:mergeCells></x:worksheet>`);
+    expect(colInfo(L, 1)).toEqual({ width: 7 });
+    expect(L.rows.get(1)).toEqual({ height: 30 });
+    expect(L.merges).toEqual([{ r1: 0, c1: 0, r2: 1, c2: 1 }]);
+    expect(L.freeze).toEqual({ rows: 3, cols: 2 });
+    expect(L.showGridLines).toBe(false);
+    expect(L.defaultRowHeight).toBe(18);
+  });
+
+  it('속성 순서·작은따옴표·hidden="true"·frozenSplit', () => {
+    const L = readLayout(`<worksheet><sheetViews><sheetView><pane state='frozenSplit' ySplit='2' xSplit='1'/></sheetView></sheetViews><cols><col width='6' hidden='true' max='2' min='2'/></cols><sheetData><row hidden='true' r='3'/></sheetData></worksheet>`);
+    expect(L.freeze).toEqual({ rows: 2, cols: 1 });
+    expect(colInfo(L, 1)).toEqual({ width: 6, hidden: true });
+    expect(L.rows.get(2)).toEqual({ hidden: true });
+  });
+
+  it('r 없는 행은 앞 행 + 1', () => {
+    const L = readLayout(`<worksheet><sheetData><row r="3" ht="10"/><row ht="11"/><row ht="12"/></sheetData></worksheet>`);
+    expect([...L.rows]).toEqual([[2, { height: 10 }], [3, { height: 11 }], [4, { height: 12 }]]);
+  });
+
+  it('겹치거나 정렬되지 않은 열 구간은 정렬하고 앞 구간이 이긴다', () => {
+    const L = readLayout(`<worksheet><cols><col min="3" max="6" width="9"/><col min="1" max="4" width="5"/></cols></worksheet>`);
+    expect(L.colRuns).toEqual([{ c1: 0, c2: 3, info: { width: 5 } }, { c1: 4, c2: 5, info: { width: 9 } }]);
+    expect(colInfo(L, 3)).toEqual({ width: 5 });
+    expect(colInfo(L, 5)).toEqual({ width: 9 });
+  });
+
+  it('한 칸짜리·잘못된 병합 참조는 건너뛰고 던지지 않는다', () => {
+    const L = readLayout(`<worksheet><mergeCells><mergeCell ref="A1"/><mergeCell ref="A1:A1"/><mergeCell ref="??:%%"/><mergeCell ref="B2:C3"/></mergeCells></worksheet>`);
+    expect(L.merges).toEqual([{ r1: 1, c1: 1, r2: 2, c2: 2 }]);
+  });
+
   it('cloneWorkbook은 레이아웃을 깊게 복사한다', () => {
     const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [['a']] }]);
     wb.sheets[0].layout = readLayout(`<worksheet><cols><col min="1" max="1" width="5"/></cols><sheetData><row r="1" ht="20"/></sheetData><mergeCells><mergeCell ref="A1:B2"/></mergeCells></worksheet>`);

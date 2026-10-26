@@ -34,12 +34,12 @@ function num(v: string | undefined): number | undefined {
 export function readLayout(sheetXml: string): SheetLayout {
   const L = emptyLayout();
 
-  const view = /<sheetView\b[^>]*>/.exec(sheetXml);
+  const view = /<(?:[\w.-]+:)?sheetView\b[^>]*>/.exec(sheetXml);
   if (view) {
     const grid = attrsOf(view[0]).showGridLines;
     if (grid !== undefined) L.showGridLines = isTrue(grid);
   }
-  const pane = /<pane\b[^>]*>/.exec(sheetXml);
+  const pane = /<(?:[\w.-]+:)?pane\b[^>]*>/.exec(sheetXml);
   if (pane) {
     const a = attrsOf(pane[0]);
     if (a.state === 'frozen' || a.state === 'frozenSplit') {
@@ -47,7 +47,7 @@ export function readLayout(sheetXml: string): SheetLayout {
     }
   }
 
-  const fmt = /<sheetFormatPr\b[^>]*>/.exec(sheetXml);
+  const fmt = /<(?:[\w.-]+:)?sheetFormatPr\b[^>]*>/.exec(sheetXml);
   if (fmt) {
     const a = attrsOf(fmt[0]);
     L.baseColWidth = num(a.baseColWidth) ?? 8;
@@ -55,10 +55,10 @@ export function readLayout(sheetXml: string): SheetLayout {
     L.defaultRowHeight = num(a.defaultRowHeight) ?? 15;
   }
 
-  const cols = /<cols\b[^>]*>([\s\S]*?)<\/cols>/.exec(sheetXml);
+  const cols = /<(?:[\w.-]+:)?cols\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?cols>/.exec(sheetXml);
   if (cols) {
     const runs: SheetLayout['colRuns'] = [];
-    for (const m of cols[1].matchAll(/<col\b[^>]*>/g)) {
+    for (const m of cols[1].matchAll(/<(?:[\w.-]+:)?col\b[^>]*>/g)) {
       const a = attrsOf(m[0]);
       const min = num(a.min);
       const max = num(a.max);
@@ -82,7 +82,7 @@ export function readLayout(sheetXml: string): SheetLayout {
   }
 
   let prev = -1;
-  for (const m of sheetXml.matchAll(/<row\b[^>]*>/g)) {
+  for (const m of sheetXml.matchAll(/<(?:[\w.-]+:)?row\b[^>]*>/g)) {
     const a = attrsOf(m[0]);
     const r = num(a.r);
     const row = r !== undefined ? r - 1 : prev + 1;
@@ -96,19 +96,26 @@ export function readLayout(sheetXml: string): SheetLayout {
     if (Object.keys(info).length > 0) L.rows.set(row, info);
   }
 
-  for (const m of sheetXml.matchAll(/<mergeCell\b[^>]*>/g)) {
+  for (const m of sheetXml.matchAll(/<(?:[\w.-]+:)?mergeCell\b[^>]*>/g)) {
     const ref = attrsOf(m[0]).ref;
     if (!ref) continue;
-    const [a, b = a] = ref.split(':');
-    const p = parseA1(a);
-    const q = parseA1(b);
-    const range: CellRange = {
-      r1: Math.min(p.row, q.row),
-      c1: Math.min(p.col, q.col),
-      r2: Math.max(p.row, q.row),
-      c2: Math.max(p.col, q.col),
-    };
-    L.merges.push(range);
+    const parts = ref.split(':');
+    if (parts.length !== 2) continue; // 한 칸짜리·잘못된 참조는 병합이 아니다
+    try {
+      const p = parseA1(parts[0]);
+      const q = parseA1(parts[1]);
+      const range: CellRange = {
+        r1: Math.min(p.row, q.row),
+        c1: Math.min(p.col, q.col),
+        r2: Math.max(p.row, q.row),
+        c2: Math.max(p.col, q.col),
+      };
+      if (![range.r1, range.c1, range.r2, range.c2].every(Number.isFinite)) continue;
+      if (range.r1 === range.r2 && range.c1 === range.c2) continue;
+      L.merges.push(range);
+    } catch {
+      // 읽을 수 없는 병합 참조는 건너뛴다(파일 전체를 못 열게 하지 않는다)
+    }
   }
   return L;
 }
