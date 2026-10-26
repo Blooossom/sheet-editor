@@ -1,5 +1,7 @@
-import { shiftLayout } from './layoutOps';
+import { isDateXf } from '../xlsx/styles';
+import { addMerge, removeMerges, setColWidth, setRowHeight, shiftLayout } from './layoutOps';
 import { parseA1, shiftFormula, shiftRange } from './refs';
+import { applyStylePatch, styleCellsOf } from './styleOps';
 import type { Axis } from './refs';
 import type { Cell, Op, SheetModel, StyleTable, WorkbookModel } from './types';
 
@@ -134,13 +136,50 @@ function applyStructural(wb: WorkbookModel, op: Extract<Op, { at: number }>): vo
   }
 }
 
+// R3: 서식이 그대로인 칸도 대상이면 고친 칸으로 표시한다
+function applyStyle(wb: WorkbookModel, op: Extract<Op, { kind: 'style' }>): void {
+  const sheet = wb.sheets[op.sheet];
+  const memo = new Map<string, number>(); // 같은 (base, 가장자리)는 같은 결과
+  for (const { row, col, base, pos } of styleCellsOf(sheet, op)) {
+    const key = `${base}:${+pos.top}${+pos.bottom}${+pos.left}${+pos.right}`;
+    let id = memo.get(key);
+    if (id === undefined) {
+      id = applyStylePatch(wb.styles, base, op.patch, pos);
+      memo.set(key, id);
+      if (isDateXf(wb.styles, wb.styles.xfs[id])) wb.dateStyleIds.add(id);
+    }
+    const prev = getCell(sheet, row, col);
+    setCell(sheet, row, col, prev ? { ...prev, styleId: id, edited: true } : { value: null, styleId: id, edited: true });
+  }
+}
+
 export function applyOp(wb: WorkbookModel, op: Op): void {
-  if (op.kind === 'set') setCell(wb.sheets[op.sheet], op.row, op.col, op.cell);
-  else applyStructural(wb, op);
+  switch (op.kind) {
+    case 'set':
+      setCell(wb.sheets[op.sheet], op.row, op.col, op.cell);
+      return;
+    case 'style':
+      applyStyle(wb, op);
+      return;
+    case 'colWidth':
+      setColWidth(wb.sheets[op.sheet].layout, op.c1, op.c2, op.width);
+      return;
+    case 'rowHeight':
+      setRowHeight(wb.sheets[op.sheet].layout, op.rows, op.height);
+      return;
+    case 'merge':
+      addMerge(wb.sheets[op.sheet].layout, op.range);
+      return;
+    case 'unmerge':
+      removeMerges(wb.sheets[op.sheet].layout, op.range);
+      return;
+    default:
+      applyStructural(wb, op);
+  }
 }
 
 export function structuralBlockReason(wb: WorkbookModel, op: Op): string | null {
-  if (op.kind === 'set') return null;
+  if (op.kind !== 'insertRows' && op.kind !== 'deleteRows' && op.kind !== 'insertCols' && op.kind !== 'deleteCols') return null;
   const sheet = wb.sheets[op.sheet];
   if (sheet.blockers.length > 0) {
     return `이 시트에는 ${sheet.blockers.join(', ')}이(가) 있어 행·열을 추가/삭제할 수 없습니다.`;
@@ -188,6 +227,9 @@ function cloneStyles(t: StyleTable): StyleTable {
     themeColors: [...t.themeColors],
     ...(t.indexedColors ? { indexedColors: [...t.indexedColors] } : {}),
     baseCounts: { ...t.baseCounts },
+    ...(t.lossy
+      ? { lossy: { fonts: new Set(t.lossy.fonts), fills: new Set(t.lossy.fills), borders: new Set(t.lossy.borders), xfs: new Set(t.lossy.xfs) } }
+      : {}),
   };
 }
 

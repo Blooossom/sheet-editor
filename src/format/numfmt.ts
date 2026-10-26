@@ -22,6 +22,10 @@ const BUILTIN: Record<number, string> = {
 // 50–58은 27–35와 같은 대응(한국어 Excel 기준)
 for (let id = 50; id <= 58; id++) BUILTIN[id] = BUILTIN[id - 23];
 
+export function builtinFormatCode(id: number): string | undefined {
+  return BUILTIN[id];
+}
+
 export function formatCode(styles: StyleTable, xfId: number | undefined): string {
   const xf = styles.xfs[xfId ?? 0];
   if (!xf) return 'General';

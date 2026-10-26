@@ -149,6 +149,70 @@ function readXf(el: Element): Xf {
   return xf;
 }
 
+// ── 손실 판별: readFont/readFill/readBorder/readXf가 버리거나 바꾸는 속성이 있으면 true ──
+const isTrueAttr = (v: string | null) => v === '1' || v === 'true';
+const attrNames = (el: Element) => Array.from({ length: el.attributes.length }, (_, i) => el.attributes[i].name);
+
+function colorLossy(el: Element | undefined): boolean {
+  if (!el) return false;
+  const names = attrNames(el);
+  const allowed = el.hasAttribute('rgb') ? ['rgb'] : el.hasAttribute('theme') ? ['theme', 'tint'] : el.hasAttribute('indexed') ? ['indexed'] : ['auto'];
+  return names.some((n) => !allowed.includes(n));
+}
+
+const FONT_CHILDREN = new Set(['name', 'sz', 'b', 'i', 'u', 'strike', 'color', 'family', 'charset', 'scheme']);
+function fontLossy(el: Element): boolean {
+  return childElements(el).some((c) => {
+    const n = c.localName;
+    if (n === 'u') {
+      const v = c.getAttribute('val'); // 회계용 밑줄, val="none"(readFont는 밑줄로 읽는다)
+      return v !== null && v !== 'single' && v !== 'double' && v !== '0' && v !== 'false';
+    }
+    if (n === 'color') return colorLossy(c);
+    if (n === 'vertAlign') return (c.getAttribute('val') ?? 'baseline') !== 'baseline';
+    if (FONT_CHILDREN.has(n)) return false;
+    if (n === 'outline' || n === 'shadow' || n === 'condense' || n === 'extend') return flag(c) === true;
+    return true;
+  });
+}
+
+function fillLossy(el: Element): boolean {
+  if (childElements(el, 'gradientFill').length > 0) return true;
+  const pf = childElements(el, 'patternFill')[0];
+  return !!pf && (colorLossy(childElements(pf, 'fgColor')[0]) || colorLossy(childElements(pf, 'bgColor')[0]));
+}
+
+function borderLossy(el: Element): boolean {
+  if (isTrueAttr(el.getAttribute('diagonalUp')) || isTrueAttr(el.getAttribute('diagonalDown'))) return true;
+  return childElements(el).some((c) => {
+    const style = c.getAttribute('style');
+    if (['left', 'right', 'top', 'bottom'].includes(c.localName)) {
+      if (style === null || style === 'none') return false;
+      return !BORDER_STYLES.has(style) || colorLossy(childElements(c, 'color')[0]);
+    }
+    return style !== null && style !== 'none'; // diagonal·vertical·horizontal·start·end
+  });
+}
+
+const XF_ATTRS = new Set(['numFmtId', 'fontId', 'fillId', 'borderId', 'xfId']);
+const ALIGN_ATTRS = new Set(['horizontal', 'vertical', 'wrapText', 'indent', 'textRotation', 'shrinkToFit']);
+function xfLossy(el: Element): boolean {
+  if (attrNames(el).some((n) => !XF_ATTRS.has(n) && !/^apply/.test(n) && isTrueAttr(el.getAttribute(n)))) return true;
+  return childElements(el).some((c) => {
+    if (c.localName === 'protection') return false;
+    if (c.localName !== 'alignment') return true;
+    return attrNames(c).some((n) => !ALIGN_ATTRS.has(n) && !['0', 'false'].includes(c.getAttribute(n) ?? ''));
+  });
+}
+
+function lossyIndexes(els: Element[], test: (el: Element) => boolean): Set<number> {
+  const out = new Set<number>();
+  els.forEach((el, i) => {
+    if (test(el)) out.add(i);
+  });
+  return out;
+}
+
 export function readStyles(parts: Parts): StyleTable {
   const text = readText(parts, 'xl/styles.xml');
   if (text === undefined) return defaultStyleTable();
@@ -163,10 +227,20 @@ export function readStyles(parts: Parts): StyleTable {
   const bordersEl = groupOf('borders');
   const xfsEl = groupOf('cellXfs');
   const base = defaultStyleTable();
-  const fonts = fontsEl ? childElements(fontsEl, 'font').map(readFont) : base.fonts;
-  const fills = fillsEl ? childElements(fillsEl, 'fill').map(readFill) : base.fills;
-  const borders = bordersEl ? childElements(bordersEl, 'border').map(readBorder) : base.borders;
-  const xfs = xfsEl ? childElements(xfsEl, 'xf').map(readXf) : base.xfs;
+  const fontEls = fontsEl ? childElements(fontsEl, 'font') : [];
+  const fillEls = fillsEl ? childElements(fillsEl, 'fill') : [];
+  const borderEls = bordersEl ? childElements(bordersEl, 'border') : [];
+  const xfEls = xfsEl ? childElements(xfsEl, 'xf') : [];
+  const fonts = fontsEl ? fontEls.map(readFont) : base.fonts;
+  const fills = fillsEl ? fillEls.map(readFill) : base.fills;
+  const borders = bordersEl ? borderEls.map(readBorder) : base.borders;
+  const xfs = xfsEl ? xfEls.map(readXf) : base.xfs;
+  const lossy = {
+    fonts: lossyIndexes(fontEls, fontLossy),
+    fills: lossyIndexes(fillEls, fillLossy),
+    borders: lossyIndexes(borderEls, borderLossy),
+    xfs: lossyIndexes(xfEls, xfLossy),
+  };
 
   const table: StyleTable = {
     numFmts,
@@ -177,6 +251,7 @@ export function readStyles(parts: Parts): StyleTable {
     themeColors: readTheme(parts),
     baseCounts: { numFmts: numFmts.size, fonts: fonts.length, fills: fills.length, borders: borders.length, xfs: xfs.length },
   };
+  if (Object.values(lossy).some((set) => set.size > 0)) table.lossy = lossy;
   const indexed = groupOf('colors') && childElements(groupOf('colors'), 'indexedColors')[0];
   if (indexed) {
     const colors = childElements(indexed, 'rgbColor').map((c) => (c.getAttribute('rgb') ?? '000000FF').slice(-6).toUpperCase());
@@ -194,11 +269,15 @@ function isBuiltinDateId(id: number): boolean {
   return (id >= 14 && id <= 22) || (id >= 27 && id <= 36) || (id >= 45 && id <= 47) || (id >= 50 && id <= 58);
 }
 
+export function isDateXf(t: StyleTable, xf: Xf): boolean {
+  const code = t.numFmts.get(xf.numFmtId);
+  return isBuiltinDateId(xf.numFmtId) || (code !== undefined && isDateFormatCode(code));
+}
+
 export function dateStyleIdsOf(t: StyleTable): Set<number> {
   const ids = new Set<number>();
   t.xfs.forEach((xf, i) => {
-    const code = t.numFmts.get(xf.numFmtId);
-    if (isBuiltinDateId(xf.numFmtId) || (code !== undefined && isDateFormatCode(code))) ids.add(i);
+    if (isDateXf(t, xf)) ids.add(i);
   });
   return ids;
 }

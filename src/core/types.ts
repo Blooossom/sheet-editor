@@ -64,6 +64,8 @@ export interface StyleTable {
   themeColors: string[]; // 'RRGGBB' 12개. Excel theme 번호 순서(0=lt1, 1=dk1, 2=lt2, 3=dk2, 4…=accent1…)
   indexedColors?: string[]; // <colors><indexedColors> 사용자 정의가 있을 때
   baseCounts: { numFmts: number; fonts: number; fills: number; borders: number; xfs: number }; // 읽었을 때의 개수(새 항목 판별)
+  // 읽을 때 표현하지 못한 속성(gradientFill, 회계용 밑줄, vertAlign 등)이 있던 항목 번호. 정규화 결과가 같아도 새 정의를 여기에 합치지 않는다.
+  lossy?: { fonts: Set<number>; fills: Set<number>; borders: Set<number>; xfs: Set<number> };
 }
 
 export interface WorkbookModel {
@@ -76,6 +78,20 @@ export interface WorkbookModel {
 
 export type StructuralKind = 'insertRows' | 'deleteRows' | 'insertCols' | 'deleteCols';
 
+export interface StylePatch {
+  font?: Partial<Pick<FontDef, 'name' | 'size' | 'bold' | 'italic' | 'underline' | 'strike'>> & { color?: ColorRef | null };
+  fill?: { color: ColorRef } | null; // null = 채우기 없음
+  border?: { preset: 'all' | 'outside' | 'none'; style?: 'thin' | 'medium' | 'thick'; color?: ColorRef };
+  align?: { horizontal?: string | null; vertical?: string | null; wrapText?: boolean };
+  numFmt?: string; // 형식 코드('General' 포함)
+  clear?: true; // 서식 지우기 → xf 0
+}
+
 export type Op =
   | { kind: 'set'; sheet: number; row: number; col: number; cell: Cell | null } // null = 지우기
-  | { kind: StructuralKind; sheet: number; at: number; count: number }; // count ≥ 1
+  | { kind: StructuralKind; sheet: number; at: number; count: number } // count ≥ 1
+  | { kind: 'style'; sheet: number; rows: number[]; c1: number; c2: number; patch: StylePatch } // rows: 원래 행 번호(필터면 보이는 행만), 오름차순
+  | { kind: 'colWidth'; sheet: number; c1: number; c2: number; width: number | null /* 문자 단위, null = 기본 */ }
+  | { kind: 'rowHeight'; sheet: number; rows: number[]; height: number | null /* pt, null = 기본 */ }
+  | { kind: 'merge'; sheet: number; range: CellRange }
+  | { kind: 'unmerge'; sheet: number; range: CellRange };
