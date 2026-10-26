@@ -3,7 +3,7 @@ import { editText } from '../../core/display';
 import type { DocumentStore } from '../../document/store';
 import { SheetGeometry } from '../../grid/geometry';
 import { colEdgeX, hitTest, pointToCell, rowEdgeY } from '../../grid/hit';
-import { contextTarget, gridKeyAction, resizeTargets } from '../../grid/interaction';
+import { contextTarget, gridKeyAction, lineSelection, resizeTargets } from '../../grid/interaction';
 import { colWidthPx, defaultColWidthPx, maxDigitWidth, rowHeightPx } from '../../grid/metrics';
 import { effectiveXf, StyleResolver } from '../../grid/resolve';
 import { expandForMerges, formatArea, move, toSelection, type GridSel, type MoveKey } from '../../grid/selection';
@@ -616,6 +616,12 @@ export const CanvasGrid = forwardRef<CanvasGridHandle, CanvasGridProps>(function
       e.preventDefault();
       const { lastRow: lr, lastCol: lc } = live.current;
       select({ anchor: { row: 0, col: 0 }, focus: { row: lr, col: lc }, mode: 'cells' });
+      return;
+    }
+    if (action.kind === 'selectRows' || action.kind === 'selectCols') {
+      e.preventDefault(); // 공백이 입력창에 들어가 편집이 열리지 않게
+      const { lastRow: lr, lastCol: lc } = live.current;
+      select(lineSelection(live.current.sel, action.kind === 'selectRows' ? 'rows' : 'cols', lr, lc));
       return;
     }
     if (action.kind === 'clear') {

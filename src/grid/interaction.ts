@@ -63,6 +63,8 @@ export type KeyAction =
   | { kind: 'move'; key: MoveKey }
   | { kind: 'edit'; initial?: string }
   | { kind: 'selectAll' }
+  | { kind: 'selectRows' } // Shift+Space
+  | { kind: 'selectCols' } // Ctrl+Space
   | { kind: 'clear' } // 선택 칸 지우기(1차 Glide의 Delete 기본 동작)
   | null
 
@@ -81,6 +83,14 @@ export function gridKeyAction(e: { key: string; shiftKey: boolean; metaKey: bool
   if (e.key === 'F2') return { kind: 'edit' }
   if ((e.key === 'Delete' || e.key === 'Backspace') && !e.metaKey && !e.ctrlKey) return { kind: 'clear' }
   if (e.metaKey && !e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === 'a') return { kind: 'selectAll' }
+  if (e.key === ' ' && !e.metaKey && e.shiftKey !== e.ctrlKey) return { kind: e.shiftKey ? 'selectRows' : 'selectCols' }
   if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) return { kind: 'edit', initial: e.key }
   return null
+}
+
+/** 선택한 칸들이 걸친 행 전체(rows) 또는 열 전체(cols)로. 방향(anchor·focus)은 그대로 둔다. */
+export function lineSelection(sel: GridSel, mode: 'rows' | 'cols', lastRow: number, lastCol: number): GridSel {
+  return mode === 'rows'
+    ? { anchor: { row: sel.anchor.row, col: 0 }, focus: { row: sel.focus.row, col: lastCol }, mode }
+    : { anchor: { row: 0, col: sel.anchor.col }, focus: { row: lastRow, col: sel.focus.col }, mode }
 }

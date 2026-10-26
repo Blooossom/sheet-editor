@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { SheetGeometry, type GeometryInput } from '../../src/grid/geometry'
-import { contextTarget, gridKeyAction, resizeTargets } from '../../src/grid/interaction'
+import { contextTarget, gridKeyAction, lineSelection, resizeTargets } from '../../src/grid/interaction'
 import type { GridSel } from '../../src/grid/selection'
 
 function geo(over: Partial<GeometryInput> = {}): SheetGeometry {
@@ -143,5 +143,22 @@ describe('gridKeyAction', () => {
     expect(k('Backspace')).toEqual({ kind: 'clear' })
     expect(k('Backspace', { metaKey: true })).toBeNull()
     expect(k('Backspace', { keyCode: 229 })).toBeNull()
+  })
+
+  it('Shift+Space는 행 선택, Ctrl+Space는 열 선택(편집을 열지 않는다)', () => {
+    expect(k(' ', { shiftKey: true })).toEqual({ kind: 'selectRows' })
+    expect(k(' ', { ctrlKey: true })).toEqual({ kind: 'selectCols' })
+    expect(k(' ', { ctrlKey: true, shiftKey: true })).toBeNull()
+    expect(k(' ', { shiftKey: true, keyCode: 229 })).toBeNull()
+  })
+})
+
+describe('lineSelection', () => {
+  const sel: GridSel = { anchor: { row: 4, col: 3 }, focus: { row: 2, col: 5 }, mode: 'cells' }
+  it('선택한 행들을 전체 행으로', () => {
+    expect(lineSelection(sel, 'rows', 99, 20)).toEqual({ anchor: { row: 4, col: 0 }, focus: { row: 2, col: 20 }, mode: 'rows' })
+  })
+  it('선택한 열들을 전체 열로', () => {
+    expect(lineSelection(sel, 'cols', 99, 20)).toEqual({ anchor: { row: 0, col: 3 }, focus: { row: 99, col: 5 }, mode: 'cols' })
   })
 })
