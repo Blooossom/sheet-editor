@@ -210,6 +210,16 @@ it('20만 칸 초과를 차단한다', () => {
   expect(st.formatCells(0, { rows, c1: 0, c2: 0 }, BOLD)).toBe('한 번에 서식을 바꿀 수 있는 칸은 200,000개까지입니다.');
   expect(st.formatCells(0, { rows: rows.slice(0, 100000), c1: 0, c2: 1 }, BOLD)).toBeNull();
 });
+it('병합이 많아도 넓은 서식 대상의 병합 확장이 빠르다', () => {
+  for (const rows of [Array.from({ length: 100000 }, (_, i) => i), Array.from({ length: 50000 }, (_, i) => i * 2)]) {
+    const { st } = newBook([['a']]);
+    const merges = st.wb.sheets[0].layout.merges;
+    for (let i = 0; i < 3000; i++) merges.push({ r1: 300000 + i * 2, c1: 0, r2: 300001 + i * 2, c2: 1 });
+    const t0 = performance.now();
+    expect(st.formatCells(0, { rows, c1: 0, c2: 0 }, BOLD)).toBeNull();
+    expect(performance.now() - t0).toBeLessThan(400);
+  }
+});
 it('필터 rows(비연속)는 보이는 행에만 적용된다', () => {
   const { st } = newBook([['a'], ['b'], ['c'], ['d']]);
   st.formatCells(0, { rows: [0, 2], c1: 0, c2: 0 }, BOLD);

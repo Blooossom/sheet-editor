@@ -261,10 +261,18 @@ export class DocumentStore {
     if (rows.length === 0 || c2 < c1) return null;
 
     const contiguous = rows[rows.length - 1] - rows[0] + 1 === rows.length;
+    // 연속 행은 양 끝으로, 비연속(필터) 행은 Set으로 겹침을 본다(행 수 × 병합 수가 되지 않게)
+    const rowSet = contiguous ? null : new Set(rows);
+    const touches = (r1: number, r2: number): boolean => {
+      if (r2 < rows[0] || r1 > rows[rows.length - 1]) return false;
+      if (!rowSet) return true;
+      for (let r = Math.max(r1, rows[0]), end = Math.min(r2, rows[rows.length - 1]); r <= end; r++) if (rowSet.has(r)) return true;
+      return false;
+    };
     for (let changed = true; changed; ) {
       changed = false;
       for (const m of sh.layout.merges) {
-        if (m.c2 < c1 || m.c1 > c2 || !rows.some((r) => r >= m.r1 && r <= m.r2)) continue;
+        if (m.c2 < c1 || m.c1 > c2 || !touches(m.r1, m.r2)) continue;
         if (m.c1 < c1 || m.c2 > c2) {
           c1 = Math.min(c1, m.c1);
           c2 = Math.max(c2, m.c2);
