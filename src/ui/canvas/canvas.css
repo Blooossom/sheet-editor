@@ -1,0 +1,14 @@
+.canvas-grid {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 전체 크기 spacer 안에서 캔버스는 화면 크기로 고정되어 스크롤을 따라온다 */
+.canvas-grid canvas {
+  position: sticky;
+  top: 0;
+  left: 0;
+  display: block;
+}

@@ -8,6 +8,7 @@ import type { Op } from '../core/types';
 import { buildRowView, distinctValues } from '../core/view';
 import { DocumentStore } from '../document/store';
 import { tauriIo } from '../document/io';
+import { CanvasGrid } from './canvas/CanvasGrid';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { FormulaBar } from './FormulaBar';
 import { Grid, showError, type ContextMenuRequest, type Selection } from './Grid';
@@ -19,6 +20,9 @@ import { useStore } from './useStore';
 import './app.css';
 
 type Unlisten = () => void;
+
+// 개발 확인용: 창 URL에 canvas=1이 있으면 캔버스 표를 읽기 전용으로 쓴다(Task 12에서 제거)
+const CANVAS_DEV = new URLSearchParams(window.location.search).get('canvas') === '1';
 
 function fileName(path: string | null): string {
   return path ? (path.split('/').pop() ?? path) : '제목 없음';
@@ -362,7 +366,8 @@ export function App() {
       />
       <FormulaBar store={store} selection={selection} />
       <div className="main">
-        {ready && (
+        {ready && CANVAS_DEV && <CanvasGrid key={current} store={store} sheet={current} rowView={view.rows} readonly />}
+        {ready && !CANVAS_DEV && (
           <Grid
             key={current}
             store={store}
