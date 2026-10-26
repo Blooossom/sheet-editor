@@ -38,8 +38,15 @@ describe('hitTest: 영역', () => {
     expect(hitTest(10, HH + 5, g, HW, HH, { x: 100, y: 40 })).toEqual({ kind: 'rowHeader', row: 2 })
   })
 
-  it('마지막 열 너머는 마지막 열로 본다', () => {
-    expect(hitTest(HW + 500, HH + 5, geo(), HW, HH, NO)).toEqual({ kind: 'cell', row: 0, col: 7 })
+  it('마지막 열·행 너머 빈 곳은 칸을 가리키지 않는다', () => {
+    const g = geo() // 열 8개 = 400px, 행 30개 = 600px
+    expect(hitTest(HW + 500, HH + 5, g, HW, HH, NO)).toEqual({ kind: 'cell', row: 0 })
+    expect(hitTest(HW + 5, HH + 700, g, HW, HH, NO)).toEqual({ kind: 'cell', col: 0 })
+    expect(hitTest(HW + 500, 10, g, HW, HH, NO)).toEqual({ kind: 'colHeader' })
+    expect(hitTest(10, HH + 700, g, HW, HH, NO)).toEqual({ kind: 'rowHeader' })
+    // 마지막 열 오른쪽 경계는 여전히 끌 수 있다
+    expect(hitTest(HW + 400 + 2, 10, g, HW, HH, NO)).toEqual({ kind: 'colEdge', col: 7 })
+    expect(hitTest(HW + 399, HH + 5, g, HW, HH, NO)).toEqual({ kind: 'cell', row: 0, col: 7 })
   })
 
   it('필터 중에는 화면 행을 돌려준다', () => {

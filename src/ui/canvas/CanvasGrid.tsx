@@ -2,9 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { DocumentStore } from '../../document/store';
 import { SheetGeometry } from '../../grid/geometry';
 import { colEdgeX, hitTest, pointToCell, rowEdgeY } from '../../grid/hit';
+import { contextTarget, gridKeyAction, resizeTargets } from '../../grid/interaction';
 import { colWidthPx, defaultColWidthPx, maxDigitWidth, rowHeightPx } from '../../grid/metrics';
 import { StyleResolver } from '../../grid/resolve';
-import { expandForMerges, move, toSelection, type GridSel, type MoveKey } from '../../grid/selection';
+import { expandForMerges, move, toSelection, type GridSel } from '../../grid/selection';
 import { makeMeasure } from '../../grid/textLayout';
 import { colInfo } from '../../xlsx/layout';
 import type { ContextMenuRequest, Selection } from '../selectionTypes';
@@ -46,19 +47,12 @@ const AUTOSCROLL_MAX = 40; // 프레임당 최대 px
 
 const INITIAL_SEL: GridSel = { anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 }, mode: 'cells' };
 
-const MOVE_KEYS: Record<string, MoveKey> = {
-  ArrowUp: 'ArrowUp', ArrowDown: 'ArrowDown', ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight',
-  Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
-};
-
 type Drag =
   | { kind: 'select'; mode: GridSel['mode'] }
   | { kind: 'resize'; axis: 'col' | 'row'; index: number; start: number; size0: number; edge0: number; px: number };
 
 const sameSel = (a: GridSel, b: GridSel) =>
   a.mode === b.mode && a.anchor.row === b.anchor.row && a.anchor.col === b.anchor.col && a.focus.row === b.focus.row && a.focus.col === b.focus.col;
-
-const between = (v: number, a: number, b: number) => v >= Math.min(a, b) && v <= Math.max(a, b);
 
 export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSelect, onContextMenu, onResize, onStartEdit }: CanvasGridProps) {
   const version = useStore(store);
@@ -200,6 +194,9 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
     return () => ro.disconnect();
   }, []);
 
+  // 처음부터 방향키가 먹도록 표에 포커스를 둔다
+  useEffect(() => scrollerRef.current?.focus({ preventScroll: true }), []);
+
   // ── 선택 ────────────────────────────────────────────────
 
   /** 행·열 모드는 반대 축을 처음부터 끝까지 채운다 */
@@ -314,8 +311,8 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (e.button !== 0 || e.ctrlKey) return; // 오른쪽 버튼·⌃클릭은 contextmenu에서 처리한다
     scrollerRef.current?.focus({ preventScroll: true });
+    if (e.button !== 0 || e.ctrlKey) return; // 오른쪽 버튼·⌃클릭은 contextmenu에서 처리한다
     const { geometry: g, headerW: hw, sel: s, lastRow: lr, lastCol: lc } = live.current;
     const p = local(e);
     const sc = scroll();
@@ -335,22 +332,23 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
       return;
     }
 
-    if (hit.kind === 'cell' && hit.row! >= 0 && hit.col! >= 0) {
-      if (e.shiftKey) select({ anchor: s.anchor, focus: { row: hit.row!, col: hit.col! }, mode: 'cells' });
+    const { row, col } = hit;
+    if (hit.kind === 'cell' && row !== undefined && col !== undefined) {
+      if (e.shiftKey) select({ anchor: s.anchor, focus: { row, col }, mode: 'cells' });
       else {
-        const a = anchorOf(hit.row!, hit.col!);
+        const a = anchorOf(row, col);
         select({ anchor: a, focus: { ...a }, mode: 'cells' });
       }
       drag.current = { kind: 'select', mode: 'cells' };
-    } else if ((hit.kind === 'rowHeader' || hit.kind === 'rowEdge') && hit.row! >= 0) {
-      const anchorRow = e.shiftKey ? s.anchor.row : hit.row!;
-      select({ anchor: { row: anchorRow, col: 0 }, focus: { row: hit.row!, col: lc }, mode: 'rows' });
+    } else if ((hit.kind === 'rowHeader' || hit.kind === 'rowEdge') && row !== undefined) {
+      const anchorRow = e.shiftKey ? s.anchor.row : row;
+      select({ anchor: { row: anchorRow, col: 0 }, focus: { row, col: lc }, mode: 'rows' });
       drag.current = { kind: 'select', mode: 'rows' };
-    } else if ((hit.kind === 'colHeader' || hit.kind === 'colEdge') && hit.col! >= 0) {
-      const anchorCol = e.shiftKey ? s.anchor.col : hit.col!;
-      select({ anchor: { row: 0, col: anchorCol }, focus: { row: lr, col: hit.col! }, mode: 'cols' });
+    } else if ((hit.kind === 'colHeader' || hit.kind === 'colEdge') && col !== undefined) {
+      const anchorCol = e.shiftKey ? s.anchor.col : col;
+      select({ anchor: { row: 0, col: anchorCol }, focus: { row: lr, col }, mode: 'cols' });
       drag.current = { kind: 'select', mode: 'cols' };
-    } else return;
+    } else return; // 마지막 행·열 너머 빈 곳
     capture();
   };
 
@@ -380,24 +378,8 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
   const finishResize = (d: Extract<Drag, { kind: 'resize' }>) => {
     const { geometry: g, sel: s } = live.current;
     const px = Math.round(d.px);
-    if (d.axis === 'col') {
-      let cols = [d.index];
-      if (s.mode === 'cols' && between(d.index, s.anchor.col, s.focus.col)) {
-        cols = [];
-        const [c1, c2] = [Math.min(s.anchor.col, s.focus.col), Math.max(s.anchor.col, s.focus.col)];
-        for (let c = c1; c <= c2; c++) if (c === d.index || !g.isColHidden(c)) cols.push(c);
-      }
-      onResize?.({ kind: 'col', cols, px });
-    } else {
-      let display = [d.index];
-      if (s.mode === 'rows' && between(d.index, s.anchor.row, s.focus.row)) {
-        display = [];
-        const [r1, r2] = [Math.min(s.anchor.row, s.focus.row), Math.max(s.anchor.row, s.focus.row)];
-        for (let r = r1; r <= r2; r++) if (r === d.index || !g.isRowHidden(r)) display.push(r);
-      }
-      const rows = display.map((r) => g.origRowOf(r)).filter((r): r is number => r !== undefined);
-      onResize?.({ kind: 'row', rows, px });
-    }
+    const targets = resizeTargets(s, d.axis, d.index, g);
+    onResize?.(d.axis === 'col' ? { kind: 'col', cols: targets, px } : { kind: 'row', rows: targets, px });
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -417,8 +399,8 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
     const p = local(e);
     const { geometry: g, headerW: hw } = live.current;
     const hit = hitTest(p.x, p.y, g, hw, HEADER_H, scroll());
-    if (hit.kind !== 'cell' || hit.row! < 0 || hit.col! < 0) return;
-    const a = anchorOf(hit.row!, hit.col!);
+    if (hit.kind !== 'cell' || hit.row === undefined || hit.col === undefined) return;
+    const a = anchorOf(hit.row, hit.col);
     select({ anchor: a, focus: { ...a }, mode: 'cells' });
     startEdit();
   };
@@ -428,71 +410,43 @@ export function CanvasGrid({ store, sheet, rowView, readonly, sessionSizes, onSe
     const p = local(e);
     const { geometry: g, headerW: hw, sel: s, lastRow: lr, lastCol: lc } = live.current;
     const hit = hitTest(p.x, p.y, g, hw, HEADER_H, scroll());
-    let next = s;
-    let target: ContextMenuRequest['target'];
-    if ((hit.kind === 'rowHeader' || hit.kind === 'rowEdge') && hit.row! >= 0) {
-      target = 'row';
-      if (!(s.mode === 'rows' && between(hit.row!, s.anchor.row, s.focus.row))) {
-        next = { anchor: { row: hit.row!, col: 0 }, focus: { row: hit.row!, col: lc }, mode: 'rows' };
-      }
-    } else if ((hit.kind === 'colHeader' || hit.kind === 'colEdge') && hit.col! >= 0) {
-      target = 'col';
-      if (!(s.mode === 'cols' && between(hit.col!, s.anchor.col, s.focus.col))) {
-        next = { anchor: { row: 0, col: hit.col! }, focus: { row: lr, col: hit.col! }, mode: 'cols' };
-      }
-    } else if (hit.kind === 'cell' && hit.row! >= 0 && hit.col! >= 0) {
-      target = 'cell';
-      const r = expandForMerges(s, g);
-      const inside = hit.row! >= r.r1 && hit.row! <= r.r2 && hit.col! >= r.c1 && hit.col! <= r.c2;
-      if (!inside) {
-        const a = anchorOf(hit.row!, hit.col!);
-        next = { anchor: a, focus: { ...a }, mode: 'cells' };
-      }
-    } else return;
-    select(next);
-    onContextMenu({ x: e.clientX, y: e.clientY, target, sel: selectionOf(fill(next)) });
+    const ctx = contextTarget(s, hit, g, lr, lc);
+    if (!ctx) return;
+    select(ctx.sel);
+    onContextMenu({ x: e.clientX, y: e.clientY, target: ctx.target, sel: selectionOf(fill(ctx.sel)) });
   };
 
   // ── 키보드 ──────────────────────────────────────────────
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.nativeEvent.isComposing || e.keyCode === 229) return; // 조합 중 키는 편집 시작(Task 11)에서 다룬다
+    const { key, shiftKey, metaKey, ctrlKey, keyCode } = e;
+    const action = gridKeyAction({ key, shiftKey, metaKey, ctrlKey, keyCode, isComposing: e.nativeEvent.isComposing });
+    if (!action) return;
+    e.preventDefault();
+    if (action.kind === 'edit') {
+      startEdit(action.initial);
+      return;
+    }
     const { geometry: g, sel: s, size: sz, headerW: hw, lastRow: lr, lastCol: lc } = live.current;
-    let key: MoveKey | undefined = MOVE_KEYS[e.key];
-    if (e.key === 'Tab') key = e.shiftKey ? 'ShiftTab' : 'Tab';
-    else if (e.key === 'Enter') key = e.shiftKey ? 'ShiftEnter' : 'Enter';
-    if (key) {
-      e.preventDefault();
-      const sc = scroll();
-      const fh = g.rowY(g.freeze.rows);
-      const v = g.visible(0, fh + sc.y, Math.max(0, sz.w - hw), Math.max(0, sz.h - HEADER_H - fh));
-      const next = move(s, key, {
-        extend: e.shiftKey,
-        jump: e.metaKey,
-        pageRows: Math.max(1, v.r2 - v.r1),
-        geo: g,
-        lastRow: lr,
-        lastCol: lc,
-        hasValue: (d, c) => {
-          const orig = g.origRowOf(d);
-          const cell = orig === undefined ? undefined : model.cells.get(orig)?.get(c);
-          return !!cell && cell.value !== null && cell.value !== '';
-        },
-      });
-      select(next);
-      const f = live.current.sel.focus;
-      reveal(next.mode === 'cols' ? -1 : f.row, next.mode === 'rows' ? -1 : f.col);
-      return;
-    }
-    if (e.key === 'F2') {
-      e.preventDefault();
-      startEdit();
-      return;
-    }
-    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) {
-      e.preventDefault();
-      startEdit(e.key);
-    }
+    const sc = scroll();
+    const fh = g.rowY(g.freeze.rows);
+    const v = g.visible(0, fh + sc.y, Math.max(0, sz.w - hw), Math.max(0, sz.h - HEADER_H - fh));
+    const next = move(s, action.key, {
+      extend: e.shiftKey,
+      jump: e.metaKey,
+      pageRows: Math.max(1, v.r2 - v.r1),
+      geo: g,
+      lastRow: lr,
+      lastCol: lc,
+      hasValue: (d, c) => {
+        const orig = g.origRowOf(d);
+        const cell = orig === undefined ? undefined : model.cells.get(orig)?.get(c);
+        return !!cell && cell.value !== null && cell.value !== '';
+      },
+    });
+    select(next);
+    const f = live.current.sel.focus;
+    reveal(next.mode === 'cols' ? -1 : f.row, next.mode === 'rows' ? -1 : f.col);
   };
 
   return (

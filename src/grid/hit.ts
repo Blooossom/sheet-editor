@@ -1,7 +1,10 @@
 import type { SheetGeometry } from './geometry'
 
 export type HitKind = 'cell' | 'rowHeader' | 'colHeader' | 'corner' | 'colEdge' | 'rowEdge'
-/** row는 화면 행. colEdge·rowEdge는 오른쪽(아래쪽) 경계를 끌면 크기가 바뀌는 열(행). */
+/**
+ * row는 화면 행. colEdge·rowEdge는 오른쪽(아래쪽) 경계를 끌면 크기가 바뀌는 열(행).
+ * 마지막 행·열 너머 빈 곳이면 해당 row/col이 없다.
+ */
 export interface Hit { kind: HitKind; row?: number; col?: number }
 
 export const EDGE_PX = 3
@@ -10,6 +13,7 @@ interface Axis {
   frozen: number // 고정된 칸 수
   size: number // 고정 영역 크기(px)
   scroll: number
+  total: number
   start(i: number): number
   hidden(i: number): boolean
   at(v: number): number
@@ -17,12 +21,12 @@ interface Axis {
 
 function colAxis(geo: SheetGeometry, scroll: number): Axis {
   const frozen = geo.freeze.cols
-  return { frozen, size: geo.colX(frozen), scroll, start: (i) => geo.colX(i), hidden: (i) => geo.isColHidden(i), at: (v) => geo.colAt(v) }
+  return { frozen, size: geo.colX(frozen), scroll, total: geo.totalWidth, start: (i) => geo.colX(i), hidden: (i) => geo.isColHidden(i), at: (v) => geo.colAt(v) }
 }
 
 function rowAxis(geo: SheetGeometry, scroll: number): Axis {
   const frozen = geo.freeze.rows
-  return { frozen, size: geo.rowY(frozen), scroll, start: (i) => geo.rowY(i), hidden: (i) => geo.isRowHidden(i), at: (v) => geo.rowAt(v) }
+  return { frozen, size: geo.rowY(frozen), scroll, total: geo.totalHeight, start: (i) => geo.rowY(i), hidden: (i) => geo.isRowHidden(i), at: (v) => geo.rowAt(v) }
 }
 
 /** 머리글 뒤 화면 좌표 → 시트 좌표(고정 영역은 스크롤하지 않는다) */
@@ -32,6 +36,13 @@ const endScreen = (a: Axis, i: number) => a.start(i + 1) - (i < a.frozen ? 0 : a
 
 function indexOn(a: Axis, local: number): number {
   return a.at(toSheet(a, Math.max(0, local)))
+}
+
+/** 포인터 아래 칸. 마지막 칸 너머이거나 보이는 칸이 없으면 undefined. */
+function exactOn(a: Axis, local: number): number | undefined {
+  if (toSheet(a, Math.max(0, local)) >= a.total) return undefined
+  const i = indexOn(a, local)
+  return i < 0 ? undefined : i
 }
 
 /** 경계선 근처면 끌어서 크기를 바꿀 칸, 아니면 null */
@@ -60,15 +71,20 @@ export function hitTest(
   const lx = x - headerW
   const ly = y - headerH
   if (lx < 0 && ly < 0) return { kind: 'corner' }
+  const at = (kind: HitKind, row: number | undefined, col: number | undefined): Hit => ({
+    kind,
+    ...(row !== undefined ? { row } : {}),
+    ...(col !== undefined ? { col } : {}),
+  })
   if (ly < 0) {
     const e = edgeOn(cols, lx)
-    return e !== null ? { kind: 'colEdge', col: e } : { kind: 'colHeader', col: indexOn(cols, lx) }
+    return e !== null ? { kind: 'colEdge', col: e } : at('colHeader', undefined, exactOn(cols, lx))
   }
   if (lx < 0) {
     const e = edgeOn(rows, ly)
-    return e !== null ? { kind: 'rowEdge', row: e } : { kind: 'rowHeader', row: indexOn(rows, ly) }
+    return e !== null ? { kind: 'rowEdge', row: e } : at('rowHeader', exactOn(rows, ly), undefined)
   }
-  return { kind: 'cell', row: indexOn(rows, ly), col: indexOn(cols, lx) }
+  return at('cell', exactOn(rows, ly), exactOn(cols, lx))
 }
 
 /** 드래그 중 포인터에 가장 가까운 칸(머리글·표 밖이면 가장자리 칸) */
