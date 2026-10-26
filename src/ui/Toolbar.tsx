@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { ColorRef, StylePatch, WorkbookModel } from '../core/types';
+import type { CellRange, ColorRef, StylePatch, WorkbookModel } from '../core/types';
 import { formatCode, isDateCode } from '../format/numfmt';
 import { effectiveXf, resolveColor, StyleResolver } from '../grid/resolve';
 import './toolbar.css';
@@ -27,8 +27,40 @@ export function numFmtKind(code: string): NumFmtKind {
   if (/[₩$€£¥]|\[\$[^\]-]/.test(code)) return 'currency';
   const bare = code.replace(/"[^"]*"|\\.|\[[^\]]*\]/g, '');
   if (bare.includes('%')) return 'percent';
-  if (/^[#,0.]+$/.test(bare.split(';')[0])) return 'number';
+  // 글자(따옴표)가 섞인 형식은 사용자 지정으로 본다
+  if (/^[#,0.]+$/.test(code.split(';')[0])) return 'number';
   return 'custom';
+}
+
+/** 선택이 기존 병합과 정확히 같으면 Excel처럼 병합 풀기 */
+export function mergeAction(merges: CellRange[], range: CellRange): 'merge' | 'unmerge' {
+  const same = merges.some((m) => m.r1 === range.r1 && m.c1 === range.c1 && m.r2 === range.r2 && m.c2 === range.c2);
+  return same ? 'unmerge' : 'merge';
+}
+
+/** 글꼴 크기 입력값. Excel 허용 범위 1–409, 0.5 단위. 아니면 null */
+function parseSize(draft: string): number | null {
+  const n = Number(draft.trim());
+  return draft.trim() !== '' && Number.isFinite(n) && n >= 1 && n <= 409 && Number.isInteger(n * 2) ? n : null;
+}
+
+/**
+ * 크기 입력창의 Enter·Escape·blur 처리. Enter·Escape는 표로 포커스를 돌리고, 그때 생기는 blur 한 번은 건너뛴다
+ * (그러지 않으면 Enter는 두 번 적용되고 Escape는 입력한 크기가 적용된다).
+ * apply: 적용할 크기, draft: 입력창에 다시 둘 값(그대로면 undefined)
+ */
+export function sizeInputStep(
+  event: 'enter' | 'escape' | 'blur',
+  draft: string,
+  current: number,
+  skipBlur: boolean,
+): { apply: number | null; draft?: string; skipBlur: boolean; focusGrid: boolean } {
+  if (event === 'blur' && skipBlur) return { apply: null, skipBlur: false, focusGrid: false };
+  const leaving = event !== 'blur';
+  if (event === 'escape') return { apply: null, draft: String(current), skipBlur: true, focusGrid: true };
+  const n = parseSize(draft);
+  if (n === null) return { apply: null, draft: String(current), skipBlur: leaving, focusGrid: leaving };
+  return { apply: n !== current ? n : null, skipBlur: leaving, focusGrid: leaving };
 }
 
 /** 선택 앵커 칸(병합이면 앵커)의 서식 */
@@ -220,12 +252,15 @@ export function Toolbar({ wb, sheet, anchor, disabled, onFormat, onMerge, onUnme
   };
   const toggle = (p: Popover) => setOpen((cur) => (cur === p ? null : p));
 
-  const commitSize = () => {
-    const n = Number(sizeDraft.trim());
-    // Excel 허용 범위 1–409, 0.5 단위
-    if (Number.isFinite(n) && n >= 1 && n <= 409 && Number.isInteger(n * 2)) {
-      if (n !== state?.size) onFormat({ font: { size: n } });
-    } else setSizeDraft(size);
+  const skipBlur = useRef(false);
+  const sizeEvent = (event: 'enter' | 'escape' | 'blur') => {
+    if (!state) return;
+    const out = sizeInputStep(event, sizeDraft, state.size, skipBlur.current);
+    // 적용·포커스 이동 중에 blur가 동기로 일어나므로 먼저 표시해 둔다
+    skipBlur.current = out.skipBlur;
+    if (out.draft !== undefined) setSizeDraft(out.draft);
+    if (out.apply !== null) onFormat({ font: { size: out.apply } });
+    if (out.focusGrid) onDone();
   };
 
   const fonts = [...new Set([...wb.styles.fonts.map((f) => f.name).filter(Boolean), ...DEFAULT_FONTS])];
@@ -328,16 +363,13 @@ export function Toolbar({ wb, sheet, anchor, disabled, onFormat, onMerge, onUnme
             disabled={off}
             value={sizeDraft}
             onChange={(e) => setSizeDraft(e.target.value)}
-            onBlur={commitSize}
+            onFocus={() => (skipBlur.current = false)}
+            onBlur={() => sizeEvent('blur')}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
-              if (e.key === 'Enter') {
+              if (e.key === 'Enter' || e.key === 'Escape') {
                 e.preventDefault();
-                commitSize();
-                onDone();
-              } else if (e.key === 'Escape') {
-                setSizeDraft(size);
-                onDone();
+                sizeEvent(e.key === 'Enter' ? 'enter' : 'escape');
               }
             }}
           />

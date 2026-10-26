@@ -39,8 +39,8 @@ export interface CanvasGridProps {
 export interface CanvasGridHandle {
   /** 편집 중인 칸을 확정한다(저장·닫기 전). 편집 중이 아니면 아무것도 하지 않는다. */
   commitEditor(): void;
-  /** 지금 선택의 서식·병합 대상 */
-  formatArea(): FormatArea;
+  /** 지금 선택의 서식·병합 대상. 보이는 행이 없으면 null */
+  formatArea(): FormatArea | null;
   /** 표에 키보드 포커스를 돌려준다(도구 막대 사용 뒤) */
   focus(): void;
 }

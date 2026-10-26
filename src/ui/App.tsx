@@ -16,7 +16,7 @@ import type { CellEdit } from './paste';
 import type { ContextMenuRequest, Selection } from './selectionTypes';
 import { SheetTabs } from './SheetTabs';
 import { SidePanel } from './SidePanel';
-import { Toolbar, toolbarState } from './Toolbar';
+import { mergeAction, Toolbar, toolbarState } from './Toolbar';
 import { argsToOps, shiftFilterCol, structuralArgs, type StructuralAction } from './structure';
 import { TopBar } from './TopBar';
 import { useStore } from './useStore';
@@ -363,6 +363,7 @@ export function App() {
       const grid = gridRef.current;
       if (!grid || store.saving || store.wb.kind === 'csv') return;
       const area = grid.formatArea();
+      if (!area) return;
       try {
         const reason = store.formatCells(currentRef.current, { rows: area.rows, c1: area.c1, c2: area.c2 }, patch);
         if (reason !== null) void message(reason, { kind: 'warning' });
@@ -377,18 +378,38 @@ export function App() {
   const toggleFont = useRef<(kind: FontToggle) => void>(() => {});
   toggleFont.current = (kind) => {
     const sel = selectionRef.current;
-    if (!sel || store.saving || store.wb.kind === 'csv') return;
+    if (!sel || sel.stale || sel.sheet !== currentRef.current || store.saving || store.wb.kind === 'csv') return;
     const state = toolbarState(store.wb, currentRef.current, sel);
     if (kind === 'bold') applyFormat({ font: { bold: !state.bold } });
     else if (kind === 'italic') applyFormat({ font: { italic: !state.italic } });
     else applyFormat({ font: { underline: state.underline ? undefined : 'single' } });
   };
 
+  const onUnmerge = useCallback(() => {
+    const grid = gridRef.current;
+    if (!grid || store.saving) return;
+    const area = grid.formatArea();
+    if (!area) return;
+    try {
+      const reason = store.unmerge(currentRef.current, area.range);
+      if (reason !== null) void message(reason, { kind: 'warning' });
+    } catch (e) {
+      showError(e);
+    }
+    grid.focus();
+  }, [store]);
+
   const onMerge = useCallback(async () => {
     const grid = gridRef.current;
     if (!grid || store.saving) return;
     const sheetIndex = currentRef.current;
     const area = grid.formatArea();
+    if (!area) return;
+    // 선택이 기존 병합과 정확히 같으면 Excel처럼 병합을 푼다
+    if (mergeAction(store.wb.sheets[sheetIndex].layout.merges, area.range) === 'unmerge') {
+      onUnmerge();
+      return;
+    }
     try {
       const check = store.mergeCheck(sheetIndex, area.range, area.mergeRows);
       if (!check.ok) {
@@ -409,19 +430,7 @@ export function App() {
     } finally {
       gridRef.current?.focus();
     }
-  }, [store]);
-
-  const onUnmerge = useCallback(() => {
-    const grid = gridRef.current;
-    if (!grid || store.saving) return;
-    try {
-      const reason = store.unmerge(currentRef.current, grid.formatArea().range);
-      if (reason !== null) void message(reason, { kind: 'warning' });
-    } catch (e) {
-      showError(e);
-    }
-    grid.focus();
-  }, [store]);
+  }, [store, onUnmerge]);
 
   const focusGrid = useCallback(() => gridRef.current?.focus(), []);
 
@@ -501,7 +510,7 @@ export function App() {
       <Toolbar
         wb={wb}
         sheet={current}
-        anchor={selection && selection.sheet === current ? selection : null}
+        anchor={selection && selection.sheet === current && !selection.stale ? selection : null}
         disabled={formatDisabled}
         onFormat={applyFormat}
         onMerge={() => void onMerge()}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toolbarState } from '../../src/ui/Toolbar';
+import { mergeAction, numFmtKind, sizeInputStep, toolbarState } from '../../src/ui/Toolbar';
 import { formatArea } from '../../src/grid/selection';
 import { SheetGeometry } from '../../src/grid/geometry';
 import type { WorkbookModel } from '../../src/core/types';
@@ -52,6 +52,64 @@ describe('toolbarState', () => {
   });
 });
 
+describe('numFmtKind', () => {
+  it('형식 코드를 분류한다', () => {
+    expect(numFmtKind('General')).toBe('general');
+    expect(numFmtKind('₩#,##0')).toBe('currency');
+    expect(numFmtKind('[$₩-412]#,##0')).toBe('currency');
+    expect(numFmtKind('"$"#,##0.00')).toBe('currency');
+    expect(numFmtKind('0%')).toBe('percent');
+    expect(numFmtKind('0.00%')).toBe('percent');
+    expect(numFmtKind('#,##0')).toBe('number');
+    expect(numFmtKind('0.00')).toBe('number');
+    expect(numFmtKind('#,##0;[Red]-#,##0')).toBe('number');
+    expect(numFmtKind('yyyy-mm-dd')).toBe('date');
+    expect(numFmtKind('0"개"')).toBe('custom');
+    expect(numFmtKind('@')).toBe('custom');
+  });
+});
+
+describe('sizeInputStep', () => {
+  // 입력창 이벤트를 차례로 흘려 적용된 크기 목록을 모은다
+  const run = (draft: string, current: number, events: ('enter' | 'escape' | 'blur')[]) => {
+    let s = { draft, skipBlur: false };
+    const applied: number[] = [];
+    for (const ev of events) {
+      const out = sizeInputStep(ev, s.draft, current, s.skipBlur);
+      if (out.apply !== null) applied.push(out.apply);
+      s = { draft: out.draft ?? s.draft, skipBlur: out.skipBlur };
+    }
+    return applied;
+  };
+
+  it('Enter 뒤 포커스가 표로 옮겨 가며 생기는 blur는 다시 적용하지 않는다', () => {
+    expect(run('14', 11, ['enter', 'blur'])).toEqual([14]);
+  });
+  it('Escape는 적용하지 않고 되돌린다', () => {
+    expect(run('14', 11, ['escape', 'blur'])).toEqual([]);
+    expect(sizeInputStep('escape', '14', 11, false)).toMatchObject({ apply: null, draft: '11', focusGrid: true });
+  });
+  it('그냥 blur는 한 번 적용하고, 같은 크기·잘못된 값은 적용하지 않는다', () => {
+    expect(run('12.5', 11, ['blur'])).toEqual([12.5]);
+    expect(run('11', 11, ['enter', 'blur'])).toEqual([]);
+    expect(sizeInputStep('enter', 'abc', 11, false)).toMatchObject({ apply: null, draft: '11' });
+    expect(sizeInputStep('blur', '500', 11, false)).toMatchObject({ apply: null, draft: '11' });
+    expect(sizeInputStep('blur', '12.3', 11, false).apply).toBeNull();
+  });
+  it('blur 건너뛰기는 한 번만', () => {
+    expect(run('14', 11, ['enter', 'blur', 'blur'])).toEqual([14, 14]);
+  });
+});
+
+describe('mergeAction', () => {
+  const merges = [{ r1: 0, c1: 0, r2: 1, c2: 2 }];
+  it('선택이 기존 병합과 정확히 같으면 풀기, 아니면 병합', () => {
+    expect(mergeAction(merges, { r1: 0, c1: 0, r2: 1, c2: 2 })).toBe('unmerge');
+    expect(mergeAction(merges, { r1: 0, c1: 0, r2: 2, c2: 2 })).toBe('merge');
+    expect(mergeAction([], { r1: 0, c1: 0, r2: 1, c2: 2 })).toBe('merge');
+  });
+});
+
 describe('formatArea', () => {
   const geo = (rowView: number[] | null) =>
     new SheetGeometry({
@@ -80,5 +138,10 @@ describe('formatArea', () => {
     const view = [0, 4, 7, 9];
     const a = formatArea({ anchor: { row: 0, col: 3 }, focus: { row: 3, col: 3 }, mode: 'cols' }, view, geo(view), 3, 29);
     expect(a).toEqual({ rows: [0, 4, 7, 9], c1: 3, c2: 3, range: { r1: 0, c1: 3, r2: 9, c2: 3 }, mergeRows: [0, 4, 7, 9] });
+  });
+
+  it('보이는 행이 없으면(검색 결과 없음) 대상이 없다', () => {
+    const view: number[] = [];
+    expect(formatArea({ anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 }, mode: 'cells' }, view, geo(view), 0, 29)).toBeNull();
   });
 });

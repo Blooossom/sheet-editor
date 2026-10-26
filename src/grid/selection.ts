@@ -196,22 +196,23 @@ export function toSelection(sel: GridSel, sheet: number, rowView: number[] | nul
 
 /**
  * 서식·병합 대상. 선택을 병합까지 넓히고 원래 행 번호로 바꾼다.
- * 필터가 없으면 화면 끝까지 닿는 축은 'all'(store가 사용 범위로 줄인다). 필터 중에는 보이는 원래 행만 넘긴다.
+ * 보이는 행이 없으면 null. 필터가 없으면 화면 끝까지 닿는 축은 'all'(store가 사용 범위로 줄인다). 필터 중에는 보이는 원래 행만 넘긴다.
  */
-export function formatArea(sel: GridSel, rowView: number[] | null, geo: SheetGeometry, lastRow: number, lastCol: number): FormatArea {
+export function formatArea(sel: GridSel, rowView: number[] | null, geo: SheetGeometry, lastRow: number, lastCol: number): FormatArea | null {
   const rect = expandForMerges(sel, geo)
   const shown: number[] = []
   for (let r = rect.r1; r <= rect.r2; r++) {
     const o = geo.origRowOf(r)
     if (o !== undefined) shown.push(o)
   }
+  if (shown.length === 0) return null // 보이는 행이 없다(검색 결과 없음)
   const allRows = !rowView && rect.r1 === 0 && rect.r2 >= lastRow
   const allCols = rect.c1 === 0 && rect.c2 >= lastCol
   return {
     rows: allRows ? 'all' : shown,
     c1: rect.c1,
     c2: allCols ? 'all' : rect.c2,
-    range: { r1: shown[0] ?? 0, c1: rect.c1, r2: shown[shown.length - 1] ?? 0, c2: rect.c2 },
+    range: { r1: shown[0], c1: rect.c1, r2: shown[shown.length - 1], c2: rect.c2 },
     mergeRows: rowView ? [...rowView] : 'all',
   }
 }

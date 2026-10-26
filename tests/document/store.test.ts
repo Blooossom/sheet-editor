@@ -5,6 +5,7 @@ import { readXlsx } from '../../src/xlsx/read';
 import { buildXlsx } from '../helpers/xlsxFixture';
 import { getCell } from '../../src/core/ops';
 import { colWidthPx, maxDigitWidth, rowHeightPx } from '../../src/grid/metrics';
+import { effectiveXf, StyleResolver } from '../../src/grid/resolve';
 function fakeIo(files: Record<string, TextFile | Uint8Array>) {
   const written: Record<string, any> = {};
   const io: DocumentIo = {
@@ -398,4 +399,23 @@ it('merge에 서식을 주면 병합과 가운데 맞춤이 되돌리기 한 단
   expect(st.wb.sheets[0].layout.merges).toEqual([]);
   expect(sid(st, 0, 0)).toBe(0);
   expect(getCell(st.wb.sheets[0], 1, 1)?.value).toBe('d');
+});
+it('병합하고 가운데 맞춤을 저장하면 다시 읽은 병합·서식이 화면 모델과 같다', async () => {
+  const xlsx = buildXlsx({ sheets: [{ name: 'S', xml:
+    '<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a</t></is></c><c r="B1" t="inlineStr"><is><t>b</t></is></c></row>' +
+    '<row r="2"><c r="A2" t="inlineStr"><is><t>c</t></is></c></row></sheetData>' }] });
+  const { io, written } = fakeIo({ '/t/m.xlsx': xlsx });
+  const st = new DocumentStore(io); await st.load('/t/m.xlsx');
+  expect(st.merge(0, { r1: 0, c1: 0, r2: 1, c2: 2 }, 'all', { align: { horizontal: 'center' } })).toBeNull();
+  const model = st.wb;
+  await st.save();
+  const re = readXlsx(written['/t/m.xlsx']);
+  expect(re.sheets[0].layout.merges).toEqual(model.sheets[0].layout.merges);
+  const a = new StyleResolver(model);
+  const b = new StyleResolver(re);
+  for (let r = 0; r <= 2; r++) for (let c = 0; c <= 3; c++) {
+    expect(b.get(effectiveXf(re.sheets[0], r, c))).toEqual(a.get(effectiveXf(model.sheets[0], r, c)));
+    expect(getCell(re.sheets[0], r, c)?.value ?? null).toEqual(getCell(model.sheets[0], r, c)?.value ?? null);
+  }
+  expect(b.get(effectiveXf(re.sheets[0], 1, 2)).hAlign).toBe('center');
 });
