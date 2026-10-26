@@ -21,8 +21,8 @@ function numberText(v: number): string {
   return String(Number(v.toPrecision(15)));
 }
 
-// 1차 규칙: 날짜는 ISO, 그 밖의 숫자는 있는 그대로(편집용).
-function plainText(cell: Cell | undefined, wb: WorkbookModel): string {
+/** 1차 규칙: 날짜는 ISO, 그 밖의 숫자는 있는 그대로. 수식 칸은 계산된 값. 복사·편집에 쓴다. */
+export function plainText(cell: Cell | undefined, wb: WorkbookModel): string {
   if (!cell) return '';
   const v = cell.value;
   if (v === null) return '';

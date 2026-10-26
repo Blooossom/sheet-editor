@@ -1,5 +1,5 @@
 import { DEFAULT_DIALECT, parseCsv } from '../../csv/csv';
-import { displayText } from '../../core/display';
+import { plainText } from '../../core/display';
 import type { CellRange, WorkbookModel } from '../../core/types';
 import type { CellEdit } from '../paste';
 
@@ -10,7 +10,7 @@ function field(s: string): string {
   return /[\t\n\r]/.test(s) || s.startsWith('"') ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** 선택 범위(행은 화면 행)를 Excel과 같은 TSV로. 칸은 화면에 보이는 글자로 복사한다. */
+/** 선택 범위(행은 화면 행)를 Excel과 같은 TSV로. 칸은 서식을 뺀 값(1차 규칙: 숫자 그대로·날짜 ISO·수식은 계산 값)으로 복사해 붙여넣어도 숫자로 남는다. */
 export function copyText(wb: WorkbookModel, sheet: number, range: CellRange, rowView: number[] | null): string {
   const cells = wb.sheets[sheet].cells;
   const lines: string[] = [];
@@ -18,7 +18,7 @@ export function copyText(wb: WorkbookModel, sheet: number, range: CellRange, row
     const row = rowView ? rowView[d] : d;
     if (row === undefined) break;
     const values: string[] = [];
-    for (let c = range.c1; c <= range.c2; c++) values.push(field(displayText(cells.get(row)?.get(c), wb)));
+    for (let c = range.c1; c <= range.c2; c++) values.push(field(plainText(cells.get(row)?.get(c), wb)));
     lines.push(values.join('\t'));
   }
   return lines.join('\n');

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { clearEdits, copyText, parseTsv } from '../../src/ui/canvas/clipboard';
 import { pasteEdits } from '../../src/ui/paste';
 import { makeWorkbook } from '../helpers/model';
+import { DocumentStore } from '../../src/document/store';
+import type { DocumentIo } from '../../src/document/io';
 
 describe('copyText', () => {
   it('선택 범위를 TSV로 만들고 여러 줄 칸은 따옴표로 감싼다', () => {
@@ -22,6 +24,33 @@ describe('copyText', () => {
   it('copyText 결과를 parseTsv로 되읽으면 같은 값이다', () => {
     const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [['x\ny', '"q'], ['', 'z']] }]);
     expect(parseTsv(copyText(wb, 0, { r1: 0, c1: 0, r2: 1, c2: 1 }, null))).toEqual([['x\ny', '"q'], ['', 'z']]);
+  });
+});
+
+describe('copyText 서식 있는 숫자', () => {
+  it('서식 숫자·날짜는 원래 값으로 복사돼 붙여넣어도 숫자로 남는다', () => {
+    const store = new DocumentStore({} as DocumentIo);
+    store.newDocument();
+    store.setCells([
+      { sheet: 0, row: 0, col: 0, input: '1234' },
+      { sheet: 0, row: 1, col: 0, input: '0.5' },
+      { sheet: 0, row: 2, col: 0, input: '45563' },
+    ]);
+    store.formatCells(0, { rows: [0], c1: 0, c2: 0 }, { numFmt: '#,##0' });
+    store.formatCells(0, { rows: [1], c1: 0, c2: 0 }, { numFmt: '0%' });
+    store.formatCells(0, { rows: [2], c1: 0, c2: 0 }, { numFmt: 'yyyy"년" m"월" d"일"' });
+    const text = copyText(store.wb, 0, { r1: 0, c1: 0, r2: 2, c2: 0 }, null);
+    expect(text).toBe('1234\n0.5\n2024-09-28');
+    store.formatCells(0, { rows: [2], c1: 2, c2: 2 }, { numFmt: 'yyyy-mm-dd' }); // 날짜 칸에 붙여넣으면 날짜 숫자가 된다
+    store.setCells(pasteEdits({ row: 0, col: 2 }, parseTsv(text), 0, null, []).edits);
+    const c = store.wb.sheets[0].cells;
+    expect([0, 1, 2].map((r) => c.get(r)!.get(2)!.value)).toEqual([1234, 0.5, 45563]);
+  });
+
+  it('수식 칸은 수식이 아니라 계산된 값을 복사한다', () => {
+    const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [[2]] }]);
+    wb.sheets[0].cells.get(0)!.set(1, { formula: 'A1*2', value: 4 });
+    expect(copyText(wb, 0, { r1: 0, c1: 0, r2: 0, c2: 1 }, null)).toBe('2\t4');
   });
 });
 
