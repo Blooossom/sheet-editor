@@ -18,9 +18,9 @@ const BUILTIN: Record<number, string> = {
   43: '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)',
   44: '_("₩"* #,##0.00_);_("₩"* \\(#,##0.00\\);_("₩"* "-"??_);_(@_)',
   45: 'mm:ss', 46: '[h]:mm:ss', 47: 'mmss.0', 48: '##0.0E+0', 49: '@',
-  50: 'yyyy"년" m"월"', 51: 'm"월" d"일"', 52: 'yyyy"년" m"월"', 53: 'm"월" d"일"', 54: 'm"월" d"일"',
-  55: 'yyyy"년" m"월"', 56: 'yyyy"년" m"월" d"일"', 57: 'yyyy"년" m"월"', 58: 'm"월" d"일"',
 };
+// 50–58은 27–35와 같은 대응(한국어 Excel 기준)
+for (let id = 50; id <= 58; id++) BUILTIN[id] = BUILTIN[id - 23];
 
 export function formatCode(styles: StyleTable, xfId: number | undefined): string {
   const xf = styles.xfs[xfId ?? 0];
@@ -28,6 +28,9 @@ export function formatCode(styles: StyleTable, xfId: number | undefined): string
   return styles.numFmts.get(xf.numFmtId) ?? BUILTIN[xf.numFmtId] ?? 'General';
 }
 
+const AMPM_OPEN = '\uE000';
+const AMPM_CLOSE = '\uE001';
+const WD = '\uE002'; // 요일 자리표시자(값마다 치환)
 const WEEKDAY_SHORT = ['일', '월', '화', '수', '목', '금', '토'];
 const COLORS: Record<string, string> = {
   black: '#000000', white: '#FFFFFF', red: '#FF0000', green: '#00FF00',
@@ -66,7 +69,7 @@ function localize(code: string, weekday: string): { code: string; ampm: boolean 
       i += /^m+/i.exec(rest)![0].length;
     } else if (/^am\/pm/i.test(rest)) {
       ampm = true;
-      out += rest.slice(0, 5);
+      out += `"${AMPM_OPEN}"${rest.slice(0, 5)}"${AMPM_CLOSE}"`; // 토큰 위치를 표시해 출력에서 정확히 그 자리만 바꾼다
       i += 5;
     } else if (ch.charCodeAt(0) > 127) {
       out += `"${ch}"`;
@@ -93,29 +96,61 @@ function splitSections(code: string): string[] {
   return parts;
 }
 
-function colorOf(code: string, value: number): string | undefined {
-  const sections = splitSections(code);
-  let idx = 0;
-  if (sections.length >= 2 && value < 0) idx = 1;
-  else if (sections.length >= 3 && value === 0) idx = 2;
-  const m = /\[(black|white|red|green|blue|yellow|magenta|cyan)\]/i.exec(sections[idx] ?? '');
-  return m ? COLORS[m[1].toLowerCase()] : undefined;
-}
-
 type Result = { text: string; color?: string };
 const CACHE_MAX = 10_000;
 const cache = new Map<string, Result>(); // 삽입 순서로 LRU
+const SECTION_COLOR = /\[(black|white|red|green|blue|yellow|magenta|cyan)\]/i;
+
+interface Compiled {
+  code: string;
+  weekday: boolean; // 요일이 있으면 [앞, 짧은 요일 자리…]를 값마다 조립
+  ampm: boolean;
+  colors: (string | undefined)[]; // 구간별 색
+  sectionCount: number;
+  isDate: boolean;
+}
+const compiled = new Map<string, Compiled>();
+
+function compile(code: string): Compiled {
+  let c = compiled.get(code);
+  if (c) return c;
+  const needsWeekday = /aaa|ddd/i.test(code);
+  // 요일은 값에 따라 달라지므로 자리표시자로 두고 값마다 치환한다
+  const loc = localize(code, WD);
+  const sections = splitSections(loc.code);
+  c = {
+    code: loc.code,
+    weekday: needsWeekday,
+    ampm: loc.ampm,
+    colors: sections.map((sec) => {
+      const m = SECTION_COLOR.exec(sec);
+      return m ? COLORS[m[1].toLowerCase()] : undefined;
+    }),
+    sectionCount: sections.length,
+    isDate: SSF.is_date(loc.code) || needsWeekday,
+  };
+  if (compiled.size >= 1000) compiled.clear();
+  compiled.set(code, c);
+  return c;
+}
 
 function compute(value: number, code: string, date1904: boolean): Result {
-  let weekday = '';
-  if (/aaa|ddd/i.test(code)) {
+  const c = compile(code);
+  let fmt = c.code;
+  if (c.weekday) {
     const p = SSF.parse_date_code(value, { date1904 });
-    if (p) weekday = WEEKDAY_SHORT[p.q] ?? '';
+    const wd = (p && WEEKDAY_SHORT[p.q]) || '';
+    fmt = fmt.split(WD).join(wd);
   }
-  const loc = localize(code, weekday);
-  let text = SSF.format(loc.code, value, { date1904 });
-  if (loc.ampm) text = text.replace(/\b(AM|PM)\b/i, (s) => (s.toUpperCase() === 'AM' ? '오전' : '오후'));
-  const color = colorOf(loc.code, value);
+  let text = SSF.format(fmt, value, { date1904 });
+  if (c.isDate && text === '') text = SSF.format('General', value); // 범위를 벗어난 날짜
+  if (c.ampm) {
+    text = text.replace(new RegExp(`${AMPM_OPEN}(AM|PM)${AMPM_CLOSE}`, 'gi'), (_, t: string) => (t.toUpperCase() === 'AM' ? '오전' : '오후'));
+  }
+  let idx = 0;
+  if (c.sectionCount >= 2 && value < 0) idx = 1;
+  else if (c.sectionCount >= 3 && value === 0) idx = 2;
+  const color = c.colors[idx];
   return color ? { text, color } : { text };
 }
 
@@ -147,7 +182,8 @@ export function formatNumber(value: number, code: string, date1904: boolean): Re
 
 export function isDateCode(code: string): boolean {
   try {
-    return SSF.is_date(localize(code, '월').code) || /aaa/i.test(code.replace(/"[^"]*"/g, ''));
+    const bare = code.replace(/"[^"]*"|\\.|\[[^\]]*\]/g, '');
+    return /aaa|ddd/i.test(bare) || SSF.is_date(localize(code, WD).code);
   } catch {
     return false;
   }

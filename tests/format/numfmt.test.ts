@@ -55,3 +55,39 @@ it('캐시는 크기가 제한되어도 결과가 같다', () => {
   for (let i = 0; i < 10_050; i++) formatNumber(i, '0.0', false);
   expect(formatNumber(3, '0.0', false).text).toBe('3.0');
 });
+
+it('내장 id 27–36, 50–58 (50→27 … 58→35)', () => {
+  const t = defaultStyleTable();
+  t.xfs = Array.from({ length: 60 }, (_, i) => ({ numFmtId: i, fontId: 0, fillId: 0, borderId: 0 }));
+  const expected: Record<number, string> = {
+    27: 'yyyy"년" m"월"', 28: 'm"월" d"일"', 29: 'm"월" d"일"', 30: 'mm-dd-yy',
+    31: 'yyyy"년" m"월" d"일"', 32: 'h"시" mm"분"', 33: 'h"시" mm"분" ss"초"',
+    34: 'yyyy-mm-dd', 35: 'yyyy-mm-dd', 36: 'yyyy"년" m"월"',
+  };
+  for (const [id, code] of Object.entries(expected)) expect(formatCode(t, Number(id))).toBe(code);
+  for (let id = 50; id <= 58; id++) expect(formatCode(t, id)).toBe(expected[id - 23]);
+});
+it('isDateCode: 요일 토큰', () => {
+  expect(isDateCode('ddd')).toBe(true);
+  expect(isDateCode('dddd')).toBe(true);
+  expect(isDateCode('aaaa')).toBe(true);
+  expect(isDateCode('"ddd"')).toBe(false);
+  expect(isDateCode('0 "aaa"')).toBe(false);
+});
+it('AM/PM은 토큰 자리만 바꾼다', () => {
+  expect(formatNumber(46293.75, 'hAM/PM', false).text).toBe('6오후');
+  expect(formatNumber(46293.25, '"AM" h AM/PM', false).text).toBe('AM 6 오전');
+});
+it('범위를 벗어난 날짜는 General 문자열', () => {
+  expect(formatNumber(-1, 'yyyy-mm-dd', false).text).toBe('-1');
+  expect(formatNumber(3000000, 'yyyy-mm-dd', false).text).toBe('3000000');
+});
+it('괄호 음수와 h 뒤 mm / mmm', () => {
+  expect(formatNumber(-5, '#,##0;(#,##0)', false).text).toBe('(5)');
+  expect(formatNumber(46293.25, 'h:mm', false).text).toBe('6:00');
+  expect(formatNumber(46293.25, 'yyyy mmm', false).text).toBe('2026 9월');
+});
+it('같은 코드를 반복해도 결과가 같다(컴파일 캐시)', () => {
+  expect(formatNumber(46293, 'aaa', false).text).toBe('월');
+  expect(formatNumber(46294, 'aaa', false).text).toBe('화');
+});
