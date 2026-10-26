@@ -2,8 +2,8 @@ export type Axis = 'row' | 'col';
 /** count>0 삽입, count<0 삭제. at은 0부터 */
 export interface Shift { sheet: string; axis: Axis; at: number; count: number }
 
-const MAX_ROW = 1048576;
-const MAX_COL = 16384;
+export const MAX_ROW = 1048576;
+export const MAX_COL = 16384;
 
 export function colToLetters(col: number): string {
   let n = col + 1;
@@ -53,7 +53,7 @@ function formatEndpoint(e: Endpoint): string {
 }
 
 /** 삽입/삭제 후의 [lo, hi] 구간. 구간 전체가 삭제되면 null. */
-function shiftSpan(lo: number, hi: number, at: number, count: number, limit: number): [number, number] | null {
+export function shiftSpan(lo: number, hi: number, at: number, count: number, limit: number): [number, number] | null {
   if (count >= 0) {
     // Excel처럼 끝은 시트 한계로 자르고, 시작이 한계를 넘으면 참조가 사라진다
     const nlo = lo >= at ? lo + count : lo;

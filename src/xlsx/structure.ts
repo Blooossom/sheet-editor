@@ -1,4 +1,5 @@
-import { colToLetters, parseA1, shiftFormula, shiftRange, shiftSqref, toA1, type Axis, type Shift } from '../core/refs';
+import { MAX_COL, MAX_ROW, colToLetters, parseA1, shiftFormula, shiftRange, shiftSqref, toA1, type Axis, type Shift } from '../core/refs';
+import { shiftFreezeCount } from '../core/layoutOps';
 import type { Op, StructuralKind } from '../core/types';
 import { cellsWithIndex, rowsWithIndex } from './cells';
 import { dirOf, readText, relsPathOf, relTargets, workbookPath, type Parts, type SheetInfo } from './package';
@@ -6,9 +7,6 @@ import { childElements, descendants, parseXml } from './xml';
 
 type StructuralCtx = { parts: Parts; docs: Map<string, Document>; sheets: SheetInfo[]; dirty: Set<string> };
 type AttrResult = 'gone' | 'changed' | 'same';
-
-const MAX_ROW = 1048576;
-const MAX_COL = 16384;
 
 // 시트 문서는 호출하는 쪽(save.ts)이 공유 수식을 풀어 docs에 넣어 둔다. 나머지 파트는 여기서 파싱해 캐시한다.
 function docOf(ctx: StructuralCtx, path: string): Document | undefined {
@@ -176,6 +174,41 @@ function shiftCols(doc: Document, at: number, count: number): void {
   if (childElements(cols, 'col').length === 0) removeEl(cols);
 }
 
+// 틀 고정(pane)의 ySplit/xSplit을 shiftLayout과 같은 규칙(shiftFreezeCount)으로 옮긴다.
+// 한 축이 0이 되면 그 속성을, 둘 다 0이면 pane을 지우고, 남은 창 구성에 맞게 selection·activePane을 정리한다.
+function shiftPane(doc: Document, axis: Axis, at: number, count: number): void {
+  const view = descendants(doc.documentElement, 'sheetView')[0];
+  const pane = view && childElements(view, 'pane')[0];
+  if (!view || !pane) return;
+  const state = pane.getAttribute('state');
+  if (state !== 'frozen' && state !== 'frozenSplit') return;
+
+  const num = (name: string) => Math.max(0, Number(pane.getAttribute(name) ?? '0') || 0);
+  const rows = axis === 'row' ? shiftFreezeCount(num('ySplit'), at, count) : num('ySplit');
+  const cols = axis === 'col' ? shiftFreezeCount(num('xSplit'), at, count) : num('xSplit');
+  const setSplit = (name: string, n: number) => (n > 0 ? pane.setAttribute(name, String(n)) : pane.removeAttribute(name));
+  setSplit('ySplit', rows);
+  setSplit('xSplit', cols);
+
+  const top = pane.getAttribute('topLeftCell');
+  if (top && /^[A-Za-z]{1,3}\d+$/.test(top)) {
+    const p = parseA1(top);
+    const row = axis === 'row' ? shiftIndex(p.row, at, count, MAX_ROW) ?? at : p.row;
+    const col = axis === 'col' ? shiftIndex(p.col, at, count, MAX_COL) ?? at : p.col;
+    pane.setAttribute('topLeftCell', toA1(Math.max(row, rows), Math.max(col, cols)));
+  }
+
+  const valid = new Set(rows > 0 && cols > 0 ? ['topRight', 'bottomLeft', 'bottomRight'] : rows > 0 ? ['bottomLeft'] : cols > 0 ? ['topRight'] : []);
+  const only = [...valid][0];
+  if (valid.size === 0) removeEl(pane);
+  else if (valid.size === 1) pane.setAttribute('activePane', only);
+  else if (!valid.has(pane.getAttribute('activePane') ?? '')) pane.setAttribute('activePane', 'bottomRight');
+  for (const sel of childElements(view, 'selection')) {
+    const name = sel.getAttribute('pane');
+    if (name !== null && !valid.has(name)) removeEl(sel);
+  }
+}
+
 function shiftTargetSheet(doc: Document, shift: Shift): void {
   const { axis, at, count } = shift;
   const root = doc.documentElement;
@@ -187,6 +220,7 @@ function shiftTargetSheet(doc: Document, shift: Shift): void {
   moveCells(doc, axis, at, count);
   recomputeDimension(doc);
   if (axis === 'col') shiftCols(doc, at, count);
+  shiftPane(doc, axis, at, count);
 
   for (const af of childElements(root, 'autoFilter')) shiftAutoFilter(af, shift);
   for (const ss of childElements(root, 'sortState')) shiftSortState(ss, range);

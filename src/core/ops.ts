@@ -1,3 +1,4 @@
+import { shiftLayout } from './layoutOps';
 import { parseA1, shiftFormula, shiftRange } from './refs';
 import type { Axis } from './refs';
 import type { Cell, Op, SheetModel, StyleTable, WorkbookModel } from './types';
@@ -120,6 +121,8 @@ function applyStructural(wb: WorkbookModel, op: Extract<Op, { at: number }>): vo
     const ref = shiftRange(t.ref, axis, at, signed);
     return ref === null ? [] : [{ ...t, ref }];
   });
+
+  shiftLayout(target.layout, axis, at, signed);
 
   const shift = { sheet: target.name, axis, at, count: signed };
   for (const sheet of wb.sheets) {
