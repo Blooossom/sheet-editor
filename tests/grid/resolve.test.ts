@@ -58,3 +58,14 @@ describe('StyleResolver', () => {
     expect(r.get(1)).not.toBe(a);
   });
 });
+
+describe('StyleResolver 없는 xf 번호', () => {
+  it('없는 번호는 xf 0 모습을 쓰되 캐시하지 않아, 나중에 생긴 xf가 보인다', () => {
+    const wb = makeWorkbook('xlsx', [{ name: 'S', grid: [] }]);
+    const r = new StyleResolver(wb);
+    expect(r.get(1)).toEqual(r.get(0));
+    wb.styles.fonts.push({ ...wb.styles.fonts[0], bold: true });
+    wb.styles.xfs.push({ ...wb.styles.xfs[0], fontId: wb.styles.fonts.length - 1 });
+    expect(r.get(1).font).toContain('bold');
+  });
+});

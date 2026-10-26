@@ -116,6 +116,8 @@ export class StyleResolver {
   constructor(private wb: WorkbookModel) {}
 
   get(xfId: number): ResolvedStyle {
+    // 없는 번호는 xf 0 모습을 쓰되 캐시하지 않는다(나중에 그 번호가 생기면 바로 보이게)
+    if (xfId !== 0 && !this.wb.styles.xfs[xfId]) return this.get(0);
     let r = this.cache.get(xfId);
     if (!r) this.cache.set(xfId, (r = this.build(xfId)));
     return r;
