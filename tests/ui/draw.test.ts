@@ -7,6 +7,7 @@ import {
   horizontalOf,
   isPlainSheet,
   lineHeightOf,
+  generalFits,
   numberFits,
   overflowExtent,
   textOrigin,
@@ -112,6 +113,28 @@ describe('numberFits', () => {
   });
   it('# 하나도 안 들어가면 빈 문자열', () => {
     expect(numberFits(5, '12', measure)).toBe('');
+  });
+});
+
+describe('generalFits (일반 형식 숫자 줄이기)', () => {
+  const inner = 64 - 2 * PAD_X; // 64px 칸
+  it('들어가면 그대로', () => {
+    expect(generalFits(1234.5, inner, measure)).toBe('1234.5');
+  });
+  it('소수는 자릿수를 반올림해 줄인다', () => {
+    expect(generalFits(1 / 3, inner, measure)).toBe('0.333333');
+    expect(generalFits(-2 / 3, inner, measure)).toBe('-0.66667');
+    expect(generalFits(12345678.9, inner, measure)).toBe('12345679');
+    expect(generalFits(0.5000001, 21, measure)).toBe('0.5'); // 반올림 뒤 끝 0은 지운다
+  });
+  it('큰 수·아주 작은 수는 지수 표기로', () => {
+    expect(generalFits(123456789012, inner, measure)).toBe('1.23E+11');
+    expect(generalFits(1e21, inner, measure)).toBe('1E+21');
+    expect(generalFits(0.000000123456, inner, measure)).toBe('1.23E-07');
+    expect(generalFits(-123456789012, inner, measure)).toBe('-1.2E+11');
+  });
+  it('지수 표기도 안 들어가면 #', () => {
+    expect(generalFits(123456789012, 28, measure)).toBe('####');
   });
 });
 

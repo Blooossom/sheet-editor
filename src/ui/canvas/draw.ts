@@ -124,6 +124,35 @@ export function numberFits(width: number, text: string, measure: (s: string) => 
   return n > 0 ? '#'.repeat(n) : '';
 }
 
+function trimZeros(s: string): string {
+  return s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s;
+}
+
+/**
+ * 일반 형식 숫자를 칸 폭에 맞춘다(Excel 규칙): 그대로 → 소수 자릿수 반올림 → 지수 표기(1.23E+11) 유효 자릿수 줄이기 → '#'.
+ */
+export function generalFits(value: number, width: number, measure: (s: string) => number): string {
+  const fits = (s: string) => measure(s) <= width;
+  const base = String(Number(value.toPrecision(15)));
+  const sci = base.includes('e'); // JS가 지수로 쓰는 크기(1e21 이상·1e-7 미만)는 Excel처럼 E 표기로
+  if (!sci && fits(base)) return base;
+  const dot = base.indexOf('.');
+  if (!sci && dot >= 0) {
+    for (let d = base.length - dot - 2; d >= 0; d--) {
+      const s = trimZeros(value.toFixed(d));
+      if (Number(s) === 0) break; // 0으로 뭉개지면 지수 표기로 넘어간다
+      if (fits(s)) return s;
+    }
+  }
+  for (let m = 14; m >= 0; m--) {
+    const [mant, exp] = value.toExponential(m).split('e');
+    const e = Number(exp);
+    const s = `${trimZeros(mant)}E${e < 0 ? '-' : '+'}${String(Math.abs(e)).padStart(2, '0')}`;
+    if (fits(s)) return s;
+  }
+  return numberFits(width, base, measure);
+}
+
 export function lineHeightOf(font: string): number {
   const m = /([\d.]+)px/.exec(font);
   return Math.round((m ? Number(m[1]) : 13) * 1.2);
@@ -375,7 +404,7 @@ function drawTexts(ctx: CanvasRenderingContext2D, v: DrawView, sheet: SheetModel
       const anchor = cellAt(sheet, m.r1, m.c1);
       if (!hasValue(anchor)) continue;
       const job = makeJob(v, anchor, styleOf(v, sheet, m.r1, m.c1), rect);
-      paintText(ctx, v, { ...job, clip: rect, lines: layoutLines(v, job, rect, typeof anchor.value === 'number') });
+      paintText(ctx, v, { ...job, clip: rect, lines: layoutLines(v, job, rect, anchor) });
     }
     if (!rowCells || h <= 0) continue;
     const from = Math.max(0, r.cols[0] - OVERFLOW_SCAN);
@@ -397,7 +426,7 @@ function drawTexts(ctx: CanvasRenderingContext2D, v: DrawView, sheet: SheetModel
       }
       const job = makeJob(v, cell, style, rect);
       if (isNumber || job.style.wrap || job.style.hAlign === 'justify') {
-        paintText(ctx, v, { ...job, clip: rect, lines: layoutLines(v, job, rect, isNumber) });
+        paintText(ctx, v, { ...job, clip: rect, lines: layoutLines(v, job, rect, cell) });
         continue;
       }
       const line = job.text.replace(/\r\n|\r|\n/g, ' ');
@@ -420,11 +449,14 @@ function drawTexts(ctx: CanvasRenderingContext2D, v: DrawView, sheet: SheetModel
   }
 }
 
-/** 고정된 칸(숫자·줄 바꿈·병합) 안의 줄. 숫자는 넘치면 '#'으로 채운다. */
-function layoutLines(v: DrawView, job: { text: string; font: string; style: ResolvedStyle; indentPx: number }, rect: Rect, isNumber: boolean): string[] {
+/** 고정된 칸(숫자·줄 바꿈·병합) 안의 줄. 일반 형식 숫자는 자릿수를 줄이고, 그 밖의 숫자는 넘치면 '#'으로 채운다. */
+function layoutLines(v: DrawView, job: { text: string; font: string; style: ResolvedStyle; indentPx: number }, rect: Rect, cell: Cell): string[] {
   const measure = v.measure(job.font);
   const inner = Math.max(0, rect.w - 2 * PAD_X - job.indentPx);
-  if (isNumber) return [numberFits(inner, job.text, measure)];
+  if (typeof cell.value === 'number') {
+    const general = v.wb.kind !== 'xlsx' || formatCode(v.wb.styles, cell.styleId) === 'General';
+    return [general && Number.isFinite(cell.value) ? generalFits(cell.value, inner, measure) : numberFits(inner, job.text, measure)];
+  }
   if (job.style.wrap || job.style.hAlign === 'justify') return wrapLines(job.text, Math.max(1, inner), measure);
   return [job.text.replace(/\r\n|\r|\n/g, ' ')];
 }
