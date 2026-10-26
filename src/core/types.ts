@@ -15,6 +15,21 @@ export interface SheetModel {
   colCount: number;
   blockers: string[]; // 행·열 구조 변경 차단 이유 (한국어 문구)
   tables: TableInfo[];
+  layout: SheetLayout;
+}
+
+export interface CellRange { r1: number; c1: number; r2: number; c2: number } // 0부터, 포함
+export interface ColInfo { width?: number /* 파일의 width(문자 단위, 패딩 포함) */; hidden?: boolean; style?: number }
+export interface RowInfo { height?: number /* pt */; hidden?: boolean; style?: number /* customFormat="1"일 때만 */ }
+export interface SheetLayout {
+  colRuns: { c1: number; c2: number; info: ColInfo }[]; // 0부터, c1 오름차순, 겹치지 않음
+  rows: Map<number, RowInfo>;
+  defaultColWidth?: number;
+  baseColWidth: number; // 기본 8
+  defaultRowHeight: number; // pt, 기본 15
+  merges: CellRange[];
+  freeze: { rows: number; cols: number }; // pane state="frozen"/"frozenSplit"의 ySplit/xSplit
+  showGridLines: boolean; // sheetView showGridLines (기본 true)
 }
 
 export interface TableInfo {

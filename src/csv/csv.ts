@@ -1,4 +1,5 @@
 import type { Cell, WorkbookModel } from '../core/types';
+import { emptyLayout } from '../xlsx/layout';
 import { defaultStyleTable } from '../xlsx/styles';
 
 export interface CsvDialect {
@@ -201,7 +202,7 @@ export function csvToWorkbook(rows: string[][], name: string): WorkbookModel {
   });
   return {
     kind: 'csv',
-    sheets: [{ name, cells, rowCount: rows.length, colCount, blockers: [], tables: [] }],
+    sheets: [{ name, cells, rowCount: rows.length, colCount, blockers: [], tables: [], layout: emptyLayout() }],
     dateStyleIds: new Set(),
     date1904: false,
     styles: defaultStyleTable(),

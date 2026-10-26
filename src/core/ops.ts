@@ -200,6 +200,13 @@ export function cloneWorkbook(wb: WorkbookModel): WorkbookModel {
       colCount: s.colCount,
       blockers: [...s.blockers],
       tables: s.tables.map((t) => ({ ...t })),
+      layout: {
+        ...s.layout,
+        colRuns: s.layout.colRuns.map((r) => ({ ...r, info: { ...r.info } })),
+        rows: new Map([...s.layout.rows].map(([k, v]) => [k, { ...v }])),
+        merges: s.layout.merges.map((m) => ({ ...m })),
+        freeze: { ...s.layout.freeze },
+      },
       cells: new Map([...s.cells].map(([r, cols]) => [r, new Map([...cols].map(([c, cell]) => [c, { ...cell }]))])),
     })),
   };

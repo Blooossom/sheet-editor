@@ -2,6 +2,7 @@ import { parseA1, translateFormula } from '../core/refs';
 import type { Cell, CellValue, SheetModel, WorkbookModel } from '../core/types';
 import { findBlockers, findTables } from './blockers';
 import { readText, sheetInfos, unzipParts, type Parts } from './package';
+import { readLayout } from './layout';
 import { dateStyleIdsOf, readStyles } from './styles';
 import { childElements, descendants, parseXml } from './xml';
 
@@ -114,6 +115,7 @@ export function readXlsx(bytes: Uint8Array): WorkbookModel {
       ...readSheetCells(xml, sst),
       blockers: findBlockers(parts, info),
       tables: findTables(parts, info),
+      layout: readLayout(xml),
     };
   });
   if (sheets.length === 0) throw new Error('편집할 수 있는 워크시트가 없습니다.'); // 차트 시트만 있는 파일

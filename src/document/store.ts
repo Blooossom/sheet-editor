@@ -1,3 +1,4 @@
+import { emptyLayout } from '../xlsx/layout';
 import { defaultStyleTable } from '../xlsx/styles';
 import { applyOp, cloneWorkbook, getCell, makeSetOp, replay, structuralBlockReason } from '../core/ops';
 import { displayText, editText } from '../core/display';
@@ -41,7 +42,7 @@ function clearEdited(wb: WorkbookModel): void {
 function emptyWorkbook(): WorkbookModel {
   return {
     kind: 'xlsx',
-    sheets: [{ name: 'Sheet1', cells: new Map(), rowCount: 0, colCount: 0, blockers: [], tables: [] }],
+    sheets: [{ name: 'Sheet1', cells: new Map(), rowCount: 0, colCount: 0, blockers: [], tables: [], layout: emptyLayout() }],
     dateStyleIds: new Set(),
     date1904: false,
     styles: defaultStyleTable(),
@@ -67,6 +68,7 @@ function toCsvModel(wb: WorkbookModel): WorkbookModel {
   out.dateStyleIds = new Set();
   out.styles = defaultStyleTable();
   for (const [si, sheet] of out.sheets.entries()) {
+    sheet.layout = emptyLayout(); // csv는 열 너비·병합 등을 저장하지 않는다
     for (const [r, cols] of [...sheet.cells]) {
       for (const c of [...cols.keys()]) {
         const text = displayText(wb.sheets[si].cells.get(r)?.get(c), wb);

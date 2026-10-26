@@ -1,3 +1,4 @@
+import { emptyLayout } from '../../src/xlsx/layout';
 import { defaultStyleTable } from '../../src/xlsx/styles';
 import type { Cell, CellValue, SheetModel, WorkbookModel } from '../../src/core/types';
 
@@ -30,7 +31,7 @@ export function makeWorkbook(
           colCount = Math.max(colCount, c + 1);
         });
       });
-      return { name, cells, rowCount, colCount, blockers: [], tables: [] };
+      return { name, cells, rowCount, colCount, blockers: [], tables: [], layout: emptyLayout() };
     }),
   };
 }
