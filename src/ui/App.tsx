@@ -94,7 +94,17 @@ interface ViewState {
   rows: number[] | null; // 검색·필터 결과(원래 행 번호). 변경 시에만 다시 계산한다
 }
 
-const INITIAL_VIEW: ViewState = { query: '', filterCol: 0, off: new Set(), rows: null };
+// 오른쪽 패널을 접었는지는 창이 바뀌어도 기억한다
+const PANEL_KEY = 'sidePanelOpen';
+function readPanelOpen(): boolean {
+  try {
+    return localStorage.getItem(PANEL_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+const INITIAL_VIEW: ViewState ={ query: '', filterCol: 0, off: new Set(), rows: null };
 
 function computeRows(store: DocumentStore, sheet: number, v: Omit<ViewState, 'rows'>): number[] | null {
   const model = store.wb.sheets[sheet];
@@ -197,6 +207,14 @@ export function App() {
   viewRef.current = view;
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [sessionSizes, setSessionSizes] = useState<SessionSizes>(NO_SIZES); // csv 크기 조절(저장하지 않음)
+  const [panelOpen, setPanelOpen] = useState(() => readPanelOpen());
+  useEffect(() => {
+    try {
+      localStorage.setItem(PANEL_KEY, panelOpen ? '1' : '0');
+    } catch {
+      // 저장소를 못 쓰면 이번 창에서만 기억한다
+    }
+  }, [panelOpen]);
   const gridRef = useRef<CanvasGridHandle>(null);
   const formulaRef = useRef<FormulaBarHandle>(null);
   const flushEdits = useCallback(() => {
@@ -522,7 +540,8 @@ export function App() {
         {ready && (
           <CanvasGrid
             ref={gridRef}
-            key={current}
+            // 형제끼리 key가 겹치면 시트를 바꿀 때 이전 표가 지워지지 않고 쌓인다
+            key={`grid-${current}`}
             store={store}
             sheet={current}
             rowView={view.rows}
@@ -537,7 +556,9 @@ export function App() {
         )}
         {ready && (
           <SidePanel
-            key={current}
+            key={`panel-${current}`}
+            open={panelOpen}
+            onOpenChange={setPanelOpen}
             store={store}
             sheet={current}
             filterCol={view.filterCol}

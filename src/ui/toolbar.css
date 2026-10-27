@@ -70,7 +70,25 @@
 }
 
 .tb-font {
-  width: 112px;
+  width: 104px;
+  border: none;
+  padding: 0 6px;
+  font: inherit;
+  background: transparent;
+  outline: none;
+}
+
+.tb-font-list {
+  width: 220px;
+  max-height: 360px;
+}
+
+.tb-font-list .tb-menu-item {
+  display: block;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tb-numfmt {

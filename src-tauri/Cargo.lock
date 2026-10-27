@@ -2842,6 +2842,8 @@ name = "sheet-editor"
 version = "0.1.0"
 dependencies = [
  "encoding_rs",
+ "objc2-core-foundation",
+ "objc2-core-text",
  "percent-encoding",
  "serde",
  "serde_json",

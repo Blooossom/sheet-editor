@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { CellRange, ColorRef, StylePatch, WorkbookModel } from '../core/types';
 import { formatCode, isDateCode } from '../format/numfmt';
@@ -63,6 +64,30 @@ export function sizeInputStep(
   return { apply: n !== current ? n : null, skipBlur: leaving, focusGrid: leaving };
 }
 
+/** 이름에 query가 들어간 글꼴(대소문자 무시). 빈 query면 전부 */
+export function filterFonts(fonts: string[], query: string): string[] {
+  const q = query.trim().toLowerCase();
+  return q ? fonts.filter((f) => f.toLowerCase().includes(q)) : fonts;
+}
+
+/**
+ * 글꼴 입력창의 Enter·Escape. Enter는 같은 이름(대소문자 무시) → 첫 검색 결과 → 입력한 이름 그대로 순으로 고른다
+ * (Excel처럼 설치되지 않은 글꼴 이름도 쓸 수 있다). apply: 적용할 이름, 없으면 null
+ */
+export function fontInputStep(event: 'enter' | 'escape', draft: string, current: string, fonts: string[]): string | null {
+  const name = draft.trim();
+  if (event === 'escape' || name === '') return null;
+  const picked = fonts.find((f) => f.toLowerCase() === name.toLowerCase()) ?? filterFonts(fonts, name)[0] ?? name;
+  return picked !== current ? picked : null;
+}
+
+// 설치된 글꼴 목록은 앱이 떠 있는 동안 바뀌지 않는다고 보고 한 번만 읽는다
+let systemFonts: Promise<string[]> | null = null;
+function loadSystemFonts(): Promise<string[]> {
+  systemFonts ??= invoke<string[]>('list_fonts').catch(() => []);
+  return systemFonts;
+}
+
 /** 선택 앵커 칸(병합이면 앵커)의 서식 */
 export function toolbarState(wb: WorkbookModel, sheet: number, anchor: { row: number; col: number }): ToolbarState {
   const sh = wb.sheets[sheet];
@@ -116,7 +141,7 @@ const MAX_RECENT = 5;
 
 const sameColor = (a: ColorRef, b: ColorRef) => JSON.stringify(a) === JSON.stringify(b);
 
-type Popover = 'size' | 'color' | 'fill' | 'border' | null;
+type Popover = 'font' | 'size' | 'color' | 'fill' | 'border' | null;
 type BorderWeight = 'thin' | 'medium' | 'thick';
 
 export interface ToolbarProps {
@@ -223,10 +248,23 @@ export function Toolbar({ wb, sheet, anchor, disabled, onFormat, onMerge, onUnme
   const [recent, setRecent] = useState<ColorRef[]>([]);
   const [weight, setWeight] = useState<BorderWeight>('thin');
   const [sizeDraft, setSizeDraft] = useState('');
+  const [fontDraft, setFontDraft] = useState('');
+  // 입력해서 찾는 중이면 검색어, ▾로 열었으면 null(전체 목록)
+  const [fontQuery, setFontQuery] = useState<string | null>(null);
+  const [installed, setInstalled] = useState<string[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const size = state ? String(state.size) : '';
   useEffect(() => setSizeDraft(size), [size]);
+  const fontName = state?.font ?? '';
+  useEffect(() => setFontDraft(fontName), [fontName]);
+  useEffect(() => {
+    let alive = true;
+    loadSystemFonts().then((list) => alive && setInstalled(list));
+    return () => {
+      alive = false;
+    };
+  }, []);
   useEffect(() => {
     if (off) setOpen(null);
   }, [off]);
@@ -265,7 +303,27 @@ export function Toolbar({ wb, sheet, anchor, disabled, onFormat, onMerge, onUnme
     if (out.focusGrid) onDone();
   };
 
-  const fonts = [...new Set([...wb.styles.fonts.map((f) => f.name).filter(Boolean), ...DEFAULT_FONTS])];
+  // 이 문서에 쓰인 글꼴과 Windows Excel 기본 글꼴을 먼저, 그다음 설치된 글꼴
+  const docFonts = [...new Set([...wb.styles.fonts.map((f) => f.name).filter(Boolean), ...DEFAULT_FONTS])];
+  const fonts = [...new Set([...docFonts, ...installed])];
+  const pickFont = (name: string) => {
+    setOpen(null);
+    setFontQuery(null);
+    if (name !== fontName) onFormat({ font: { name } });
+    onDone();
+  };
+  const fontItem = (f: string) => (
+    <button
+      key={f}
+      type="button"
+      className={`tb-menu-item${f === fontName ? ' active' : ''}`}
+      style={{ fontFamily: `"${f}", -apple-system, sans-serif` }}
+      onMouseDown={keepFocus}
+      onClick={() => pickFont(f)}
+    >
+      {f}
+    </button>
+  );
   const code = anchor ? formatCode(wb.styles, effectiveXf(wb.sheets[sheet], anchor.row, anchor.col)) : 'General';
   const known = NUM_FORMATS.some(([c]) => c === code);
 
@@ -336,23 +394,64 @@ export function Toolbar({ wb, sheet, anchor, disabled, onFormat, onMerge, onUnme
 
   return (
     <div className="toolbar" ref={rootRef} role="toolbar" aria-label="서식">
-      <select
-        className="tb-font"
-        title="글꼴"
-        aria-label="글꼴"
-        disabled={off}
-        value={state?.font ?? ''}
-        onChange={(e) => {
-          onFormat({ font: { name: e.target.value } });
-          onDone();
-        }}
-      >
-        {fonts.map((f) => (
-          <option key={f} value={f}>
-            {f}
-          </option>
-        ))}
-      </select>
+      <div className="tb-anchor">
+        <div className="tb-combo">
+          <input
+            className="tb-font"
+            type="text"
+            title="글꼴"
+            aria-label="글꼴"
+            disabled={off}
+            value={fontDraft}
+            onChange={(e) => {
+              setFontDraft(e.target.value);
+              setFontQuery(e.target.value);
+              setOpen('font');
+            }}
+            onFocus={(e) => e.target.select()}
+            // 고르지 않고 벗어나면 원래 이름으로 돌린다
+            onBlur={() => setFontDraft(fontName)}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return;
+              if (e.key === 'Enter' || e.key === 'Escape') {
+                e.preventDefault();
+                const name = fontInputStep(e.key === 'Enter' ? 'enter' : 'escape', fontDraft, fontName, fonts);
+                setFontDraft(fontName);
+                pickFont(name ?? fontName);
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="tb-drop"
+            title="글꼴 목록"
+            aria-label="글꼴 목록"
+            disabled={off}
+            onMouseDown={keepFocus}
+            onClick={() => {
+              setFontQuery(null);
+              toggle('font');
+            }}
+          >
+            ▾
+          </button>
+        </div>
+        {open === 'font' && (
+          <div className="tb-popover tb-list tb-font-list" role="listbox" aria-label="글꼴">
+            {fontQuery !== null ? (
+              filterFonts(fonts, fontQuery).map(fontItem)
+            ) : (
+              <>
+                <div className="tb-caption">이 문서·기본</div>
+                {docFonts.map(fontItem)}
+                {installed.length > 0 && <div className="tb-caption">설치된 글꼴</div>}
+                {installed.filter((f) => !docFonts.includes(f)).map(fontItem)}
+              </>
+            )}
+            {fontQuery !== null && filterFonts(fonts, fontQuery).length === 0 && <div className="tb-caption">찾는 글꼴이 없습니다. Enter로 이 이름을 그대로 씁니다.</div>}
+          </div>
+        )}
+      </div>
 
       <div className="tb-anchor">
         <div className="tb-combo">

@@ -148,6 +148,46 @@ body,
   min-height: 0;
 }
 
+.side-panel.collapsed {
+  width: 28px;
+  padding: 8px 2px;
+  align-items: center;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-toggle {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #6e6e73;
+  font-size: 16px;
+  line-height: 1;
+  cursor: default;
+}
+
+.panel-toggle:hover {
+  background: #e8e8ed;
+}
+
+.panel-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #0a64d6;
+}
+
 .panel-label {
   color: #6e6e73;
   font-size: 12px;

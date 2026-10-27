@@ -1,3 +1,4 @@
+mod fonts;
 mod io;
 mod menu;
 mod windows;
@@ -11,6 +12,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(windows::Docs::default())
         .invoke_handler(tauri::generate_handler![
+            fonts::list_fonts,
             io::read_file,
             io::write_file,
             io::read_text,

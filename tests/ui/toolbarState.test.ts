@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CURRENCY_FMT, mergeAction, numFmtKind, sizeInputStep, toolbarState } from '../../src/ui/Toolbar';
+import { CURRENCY_FMT, filterFonts, fontInputStep, mergeAction, numFmtKind, sizeInputStep, toolbarState } from '../../src/ui/Toolbar';
 import { formatNumber } from '../../src/format/numfmt';
 import { formatArea } from '../../src/grid/selection';
 import { SheetGeometry } from '../../src/grid/geometry';
@@ -152,5 +152,27 @@ describe('formatArea', () => {
   it('보이는 행이 없으면(검색 결과 없음) 대상이 없다', () => {
     const view: number[] = [];
     expect(formatArea({ anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 }, mode: 'cells' }, view, geo(view), 0, 29)).toBeNull();
+  });
+});
+
+describe('글꼴 찾기', () => {
+  const fonts = ['맑은 고딕', 'Arial', 'Arial Black', 'Apple SD Gothic Neo', 'Helvetica'];
+
+  it('대소문자 없이 이름 일부로 찾는다', () => {
+    expect(filterFonts(fonts, 'gothic')).toEqual(['Apple SD Gothic Neo']);
+    expect(filterFonts(fonts, ' ari ')).toEqual(['Arial', 'Arial Black']);
+    expect(filterFonts(fonts, '')).toEqual(fonts);
+  });
+
+  it('Enter: 같은 이름 → 첫 검색 결과 → 입력한 이름 그대로', () => {
+    expect(fontInputStep('enter', 'arial', '맑은 고딕', fonts)).toBe('Arial');
+    expect(fontInputStep('enter', 'black', '맑은 고딕', fonts)).toBe('Arial Black');
+    expect(fontInputStep('enter', '나눔고딕', '맑은 고딕', fonts)).toBe('나눔고딕');
+  });
+
+  it('지금 글꼴·빈 입력·Escape는 적용하지 않는다', () => {
+    expect(fontInputStep('enter', 'Arial', 'Arial', fonts)).toBeNull();
+    expect(fontInputStep('enter', '  ', 'Arial', fonts)).toBeNull();
+    expect(fontInputStep('escape', 'Helvetica', 'Arial', fonts)).toBeNull();
   });
 });
